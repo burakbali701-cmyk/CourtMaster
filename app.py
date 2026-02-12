@@ -18,6 +18,24 @@ st.markdown("""
         padding: 15px; border-radius: 10px; color: white; text-align: center;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3); margin-bottom: 10px;
     }
+    /* Yeni Progress Bar Stili */
+    .progress-container {
+        width: 100%;
+        background-color: #2b2d3e;
+        border-radius: 15px;
+        margin: 10px 0;
+        overflow: hidden;
+        box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    }
+    .progress-bar {
+        height: 35px;
+        line-height: 35px;
+        color: white;
+        text-align: center;
+        font-weight: bold;
+        transition: width 0.5s ease-in-out;
+        box-shadow: 2px 0 5px rgba(0,0,0,0.3);
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -28,21 +46,14 @@ ADMIN_SIFRE = "1234"
 @st.cache_resource
 def baglanti_kur():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # 1. Cloud'daki Secrets'a bak
     if "gcp_service_account" in st.secrets:
         creds_dict = dict(st.secrets["gcp_service_account"])
-        # Private key içindeki \n karakterlerini düzelt (Streamlit sorunu için fix)
         if "private_key" in creds_dict:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    
-    # 2. Yoksa Localdeki dosyaya bak
     else:
         creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
-        
     client = gspread.authorize(creds)
-    # Tablo adı CourtMaster_DB olarak kalmalı (Google'daki dosya adı bu olduğu için)
     return client.open("CourtMaster_DB")
 
 # --- VERİ ÇEKME ---
@@ -53,13 +64,10 @@ def get_data_cached(worksheet_name, columns):
         ws = sheet.worksheet(worksheet_name)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
-        if df.empty:
-            df = pd.DataFrame(columns=columns)
+        if df.empty: df = pd.DataFrame(columns=columns)
         else:
             for col in columns:
-                if col not in df.columns:
-                    df[col] = "Belirsiz" if col == "Odeme Durumu" else "-"
-            # Sayısal dönüşüm
+                if col not in df.columns: df[col] = "Belirsiz" if col == "Odeme Durumu" else "-"
             if "Tutar" in df.columns: df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
             if "Kalan Ders" in df.columns: df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
         return df
@@ -69,30 +77,22 @@ def get_data_cached(worksheet_name, columns):
         ws.append_row(columns)
         return pd.DataFrame(columns=columns)
     except Exception as e:
-        st.error(f"Veri Çekme Hatası: {e}")
-        return pd.DataFrame(columns=columns)
+        st.error(f"Veri Çekme Hatası: {e}"); return pd.DataFrame(columns=columns)
 
 # --- VERİ KAYDETME ---
 def save_data(df, worksheet_name):
     try:
-        sheet = baglanti_kur() 
-        ws = sheet.worksheet(worksheet_name)
-        ws.clear()
-        ws.update([df.columns.values.tolist()] + df.values.tolist())
+        sheet = baglanti_kur(); ws = sheet.worksheet(worksheet_name)
+        ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
         st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Kaydetme Hatası: {e}")
-        time.sleep(1)
+    except Exception as e: st.error(f"Kaydetme Hatası: {e}"); time.sleep(1)
 
 def append_data(row_data, worksheet_name, columns):
     try:
-        sheet = baglanti_kur() 
+        sheet = baglanti_kur()
         try: ws = sheet.worksheet(worksheet_name)
-        except: 
-            ws = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=20)
-            ws.append_row(columns)
-        ws.append_row(row_data)
-        st.cache_data.clear()
+        except: ws = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=20); ws.append_row(columns)
+        ws.append_row(row_data); st.cache_data.clear()
     except Exception as e: st.error(f"Ekleme Hatası: {e}")
 
 # --- ARAYÜZ ---
@@ -102,16 +102,13 @@ with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2906/2906260.png", width=80)
     with st.expander("🔒 Yönetici Girişi"):
         if st.text_input("Şifre", type="password") == ADMIN_SIFRE:
-            st.session_state["admin"] = True
-            st.success("Giriş Yapıldı")
+            st.session_state["admin"] = True; st.success("Giriş Yapıldı")
         else: st.session_state["admin"] = False
-    
     IS_ADMIN = st.session_state.get("admin", False)
     menu_opts = ["🏠 Yoklama", "📅 Program", "👥 Öğrenci", "💸 Finans"]
     if IS_ADMIN: menu_opts.append("📝 Log Merkezi")
     menu = st.radio("Menü", menu_opts)
 
-# Ana veriyi çek
 df_main = get_data_cached("Ogrenci_Data", ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu"])
 
 if menu == "📅 Program":
@@ -122,7 +119,6 @@ if menu == "📅 Program":
         df_prog = pd.DataFrame({"Saat": saatler})
         for gun in ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]: df_prog[gun] = ""
         save_data(df_prog, "Ders_Programi")
-    
     if IS_ADMIN:
         edited = st.data_editor(df_prog, num_rows="fixed", use_container_width=True, height=600, hide_index=True)
         if not df_prog.equals(edited): save_data(edited, "Ders_Programi"); st.toast("Kaydedildi!", icon="✅")
@@ -170,17 +166,39 @@ elif menu == "👥 Öğrenci":
         with t3: st.dataframe(df_main)
     else: st.dataframe(df_main[["Ad Soyad", "Kalan Ders", "Durum", "Odeme Durumu"]])
 
+# --- YOKLAMA (YENİ GÖRSEL ÇUBUKLU VERSİYON!) ---
 elif menu == "🏠 Yoklama":
     c1,c2 = st.columns([2,1])
     with c1:
         aktif = df_main[df_main["Durum"]=="Aktif"]
         if not aktif.empty:
-            sec = st.selectbox("Öğrenci", aktif["Ad Soyad"].unique())
+            sec = st.selectbox("Öğrenci Seç", aktif["Ad Soyad"].unique())
             idx = df_main[df_main["Ad Soyad"]==sec].index[0]
             kalan = int(df_main.at[idx, "Kalan Ders"])
             durum = df_main.at[idx, "Odeme Durumu"]
-            renk = "#4CAF50" if durum=="Ödendi" else "#FF5252"
-            st.markdown(f"""<div class="metric-card" style="border-left:10px solid {renk}"><h3>{sec}</h3><h1>{kalan} Ders</h1><p style="color:{renk}">{durum}</p></div>""", unsafe_allow_html=True)
+            
+            # --- GÖRSEL ÇUBUK MANTIĞI ---
+            # Renk Belirleme
+            if kalan > 5: bar_color = "#4CAF50" # Yeşil
+            elif kalan > 2: bar_color = "#FF9800" # Turuncu
+            else: bar_color = "#FF5252" # Kırmızı
+            
+            # Genişlik Hesaplama (Maksimum 20 derslik bir görsel referans alalım)
+            width_percent = min((kalan / 20) * 100, 100)
+            if width_percent < 15 and kalan > 0: width_percent = 15 # Sayı görünsün diye min genişlik
+            
+            # Ödeme İkonu
+            ode_ikon = "✅" if durum == "Ödendi" else "❌"
+
+            st.markdown(f"""
+            <h3>{sec} <span style="font-size:0.7em; color:{bar_color}">{ode_ikon} {durum}</span></h3>
+            <div class="progress-container">
+                <div class="progress-bar" style="width: {width_percent}%; background-color: {bar_color};">
+                    {kalan} Ders Kaldı
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            # ---------------------------
             
             if IS_ADMIN:
                 if durum != "Ödendi":
