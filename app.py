@@ -7,7 +7,7 @@ from datetime import datetime
 import time
 
 # --- AYARLAR & TASARIM ---
-st.set_page_config(page_title="Tennis Platform", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Tennis App", page_icon="🎾", layout="wide")
 
 st.markdown("""
     <style>
@@ -24,7 +24,7 @@ st.markdown("""
 # --- YÖNETİCİ ŞİFRESİ ---
 ADMIN_SIFRE = "1234"
 
-# --- GOOGLE SHEETS BAĞLANTISI (KESİN ÇÖZÜM) ---
+# --- GOOGLE SHEETS BAĞLANTISI ---
 @st.cache_resource
 def baglanti_kur():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -42,13 +42,13 @@ def baglanti_kur():
         creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
         
     client = gspread.authorize(creds)
+    # Tablo adı CourtMaster_DB olarak kalmalı (Google'daki dosya adı bu olduğu için)
     return client.open("CourtMaster_DB")
 
-# --- VERİ ÇEKME (HATA DÜZELTİLDİ: sheet içeride çağrılıyor) ---
+# --- VERİ ÇEKME ---
 @st.cache_data(ttl=10)
 def get_data_cached(worksheet_name, columns):
     try:
-        # BAĞLANTIYI BURADA ÇAĞIRIYORUZ Kİ "NameError" VERMESİN
         sheet = baglanti_kur()
         ws = sheet.worksheet(worksheet_name)
         data = ws.get_all_records()
@@ -69,14 +69,13 @@ def get_data_cached(worksheet_name, columns):
         ws.append_row(columns)
         return pd.DataFrame(columns=columns)
     except Exception as e:
-        # Eğer bağlantı hatası olursa kullanıcıya göster
         st.error(f"Veri Çekme Hatası: {e}")
         return pd.DataFrame(columns=columns)
 
 # --- VERİ KAYDETME ---
 def save_data(df, worksheet_name):
     try:
-        sheet = baglanti_kur() # Bağlantıyı al
+        sheet = baglanti_kur() 
         ws = sheet.worksheet(worksheet_name)
         ws.clear()
         ws.update([df.columns.values.tolist()] + df.values.tolist())
@@ -87,7 +86,7 @@ def save_data(df, worksheet_name):
 
 def append_data(row_data, worksheet_name, columns):
     try:
-        sheet = baglanti_kur() # Bağlantıyı al
+        sheet = baglanti_kur() 
         try: ws = sheet.worksheet(worksheet_name)
         except: 
             ws = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=20)
@@ -97,7 +96,7 @@ def append_data(row_data, worksheet_name, columns):
     except Exception as e: st.error(f"Ekleme Hatası: {e}")
 
 # --- ARAYÜZ ---
-st.title("🎾 CourtMaster CLOUD")
+st.title("🎾 Tennis App")
 
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/2906/2906260.png", width=80)
@@ -231,4 +230,3 @@ elif menu == "📝 Log Merkezi":
     kisi = st.selectbox("Filtrele", ["Tümü"] + list(df_main["Ad Soyad"].unique()))
     if kisi != "Tümü": loglar = loglar[loglar["Ogrenci"]==kisi]
     st.dataframe(loglar.sort_index(ascending=False), use_container_width=True, height=600)
-
