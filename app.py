@@ -7,7 +7,7 @@ from datetime import datetime
 import time
 
 # --- AYARLAR & TASARIM ---
-st.set_page_config(page_title="CourtMaster CLOUD", page_icon="🎾", layout="wide")
+st.set_page_config(page_title="Tennis Platform", page_icon="🎾", layout="wide")
 
 st.markdown("""
     <style>
@@ -231,3 +231,4 @@ elif menu == "📝 Log Merkezi":
     kisi = st.selectbox("Filtrele", ["Tümü"] + list(df_main["Ad Soyad"].unique()))
     if kisi != "Tümü": loglar = loglar[loglar["Ogrenci"]==kisi]
     st.dataframe(loglar.sort_index(ascending=False), use_container_width=True, height=600)
+
