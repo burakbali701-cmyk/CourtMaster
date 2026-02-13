@@ -44,14 +44,14 @@ st.markdown("""
     }
     
     /* Renk Kodları */
-    .t-money { border-left: 4px solid #00e676 !important; }
+    .t-money { border-left: 4px solid #00e676 !important; } /* Para */
     .t-money::before { background: #00e676; box-shadow: 0 0 10px #00e676; }
     
-    .t-lesson { border-left: 4px solid #ccff00 !important; }
+    .t-lesson { border-left: 4px solid #ccff00 !important; } /* Ders */
     .t-lesson::before { background: #ccff00; box-shadow: 0 0 10px #ccff00; }
     
-    .t-user { border-left: 4px solid #00b0ff !important; }
-    .t-user::before { background: #00b0ff; box-shadow: 0 0 10px #00b0ff; }
+    .t-sys { border-left: 4px solid #00b0ff !important; } /* Ziyaretçi/Sistem */
+    .t-sys::before { background: #00b0ff; box-shadow: 0 0 10px #00b0ff; }
     
     .time-badge { font-size: 0.8em; color: #888; margin-bottom: 5px; display: block; }
     .log-title { font-size: 1.1em; font-weight: bold; color: white; }
@@ -107,7 +107,6 @@ def get_data_cached(worksheet_name, expected_columns):
                 
         df = pd.DataFrame(clean_data, columns=expected_columns)
         
-        # Sayısal Temizlik
         if "Tutar" in df.columns:
             df["Tutar"] = df["Tutar"].astype(str).str.strip().str.replace(',', '.', regex=False)
             df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
@@ -137,17 +136,14 @@ COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
 COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
 COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# --- 🕵️‍♂️ GİZLİ ZİYARETÇİ LOG SİSTEMİ ---
-# Sayfa her yüklendiğinde değil, oturum başına 1 kez çalışır.
+# --- 🕵️‍♂️ ZİYARETÇİ TAKİP ---
 if "ziyaret_kaydedildi" not in st.session_state:
     try:
         tarih = datetime.now().strftime("%d-%m-%Y")
         saat = datetime.now().strftime("%H:%M")
-        # Kimseye hissettirmeden veritabanına yaz
         append_data([tarih, saat, "Misafir", "Giriş", "Sayfa Görüntülendi"], "Ders_Gecmisi", COL_LOG)
         st.session_state["ziyaret_kaydedildi"] = True
-    except:
-        pass # Hata olursa akışı bozma
+    except: pass
 
 # --- ARAYÜZ ---
 with st.sidebar:
@@ -157,11 +153,9 @@ with st.sidebar:
         else: st.session_state["admin"] = False
     IS_ADMIN = st.session_state.get("admin", False)
     
-    # MENÜ AYARI: Geçmiş ve Kasa SADECE Admin'e açık
     if IS_ADMIN:
         menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Kasa", "📝 Geçmiş"])
     else:
-        # Normal kullanıcılar Geçmişi GÖREMEZ
         menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
 # Verileri Çek
@@ -173,20 +167,16 @@ df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
 if menu == "🏠 Kort Paneli":
     st.markdown("<h2 style='color: white;'>🎾 Kort Yönetimi</h2>", unsafe_allow_html=True)
     aktif = df_main[df_main["Durum"]=="Aktif"]
-    
     if not aktif.empty:
         col_select, col_empty = st.columns([2,1])
         with col_select:
             sec = st.selectbox("Oyuncu Seç", aktif["Ad Soyad"].unique())
-            
         if sec:
             idx = df_main[df_main["Ad Soyad"]==sec].index[0]
             kalan = int(df_main.at[idx, "Kalan Ders"])
             odeme_durumu = df_main.at[idx, "Odeme Durumu"]
             bar_color = "#ccff00" if kalan > 5 else ("#ffa500" if kalan > 2 else "#ff4b4b")
             width = min((kalan / 15) * 100, 100)
-            
-            # Badge Rengi
             b_class = "badge-paid" if odeme_durumu == "Ödendi" else "badge-unpaid"
             
             st.markdown(f"""
@@ -238,22 +228,16 @@ elif menu == "👥 Sporcular":
                 idx = df_main[df_main["Ad Soyad"] == secilen].index[0]
                 durum = df_main.at[idx, "Durum"]
                 odeme = df_main.at[idx, "Odeme Durumu"]
-
-                # Badge Rengi Belirleme
+                
                 if durum == "Donduruldu": b_durum_cls, b_durum_txt = "badge-frozen", "DONDURULDU"
                 else: b_durum_cls, b_durum_txt = "badge-paid" if durum=="Aktif" else "badge-unpaid", durum.upper()
-                
                 b_odeme_cls = "badge-paid" if odeme == "Ödendi" else "badge-unpaid"
 
-                # PROFİL BAŞLIĞI
                 st.markdown(f"""
                 <div style="background:#1e211e; padding:20px; border-radius:15px; border-left:5px solid #ccff00; margin-bottom:20px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <h2 style="margin:0; color:white;">{secilen}</h2>
-                        <div>
-                            <span class="{b_durum_cls}">{b_durum_txt}</span>
-                            <span class="{b_odeme_cls}" style="margin-left:10px;">{odeme.upper()}</span>
-                        </div>
+                        <div><span class="{b_durum_cls}">{b_durum_txt}</span><span class="{b_odeme_cls}" style="margin-left:10px;">{odeme.upper()}</span></div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -269,11 +253,8 @@ elif menu == "👥 Sporcular":
                         y_tutar = st.number_input("Tahsilat Yap (TL)", 0.0, step=100.0)
                         y_not = st.text_area("Notlar", str(df_main.at[idx, "Notlar"]))
                         
-                        # Dondurma Checkbox
-                        if durum == "Aktif":
-                            dondur = st.checkbox("❄️ Kaydı Dondur")
-                        else:
-                            dondur = st.checkbox("🔥 Kaydı Aktif Et", value=True)
+                        if durum == "Aktif": dondur = st.checkbox("❄️ Kaydı Dondur")
+                        else: dondur = st.checkbox("🔥 Kaydı Aktif Et", value=True)
                         
                         if st.form_submit_button("KAYDET"):
                             if ek > 0:
@@ -286,10 +267,7 @@ elif menu == "👥 Sporcular":
                             
                             df_main.at[idx, "Odeme Durumu"] = y_odeme
                             df_main.at[idx, "Notlar"] = y_not
-                            
-                            # Durum Yönetimi
                             if dondur and durum == "Aktif": df_main.at[idx, "Durum"] = "Donduruldu"
-                            elif not dondur and durum == "Donduruldu": pass
                             elif dondur and durum == "Donduruldu": df_main.at[idx, "Durum"] = "Aktif"
                             elif df_main.at[idx, "Kalan Ders"] > 0: df_main.at[idx, "Durum"] = "Aktif"
 
@@ -312,13 +290,7 @@ elif menu == "👥 Sporcular":
                         for _, r in full_log.head(10).iterrows():
                             cls = "t-money" if r.get("Tip")=="Para" else "t-lesson"
                             icon = "💰" if r.get("Tip")=="Para" else "🎾"
-                            st.markdown(f"""
-                            <div class="timeline-item {cls}">
-                                <span class="time-badge">{r['Tarih']} {r['Saat']}</span>
-                                <div class="log-title">{icon} {r['Islem']}</div>
-                                <div class="log-detail">{r['Detay']}</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f"""<div class="timeline-item {cls}"><span class="time-badge">{r['Tarih']} {r['Saat']}</span><div class="log-title">{icon} {r['Islem']}</div><div class="log-detail">{r['Detay']}</div></div>""", unsafe_allow_html=True)
                         st.markdown('</div>', unsafe_allow_html=True)
                     else: st.info("Kayıt yok.")
 
@@ -339,13 +311,13 @@ elif menu == "👥 Sporcular":
                     st.success("Eklendi"); time.sleep(0.5); st.rerun()
     else: st.dataframe(df_main, use_container_width=True)
 
-# --- 3. FİNANS (KÖR OKUMA - T KOD) ---
+# --- 3. FİNANS ---
 elif menu == "💸 Kasa":
     st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
         if not df_finans.empty:
             df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
-            df_finans["Tip"] = df_finans["Tip"].astype(str).str.strip() # Temizlik
+            df_finans["Tip"] = df_finans["Tip"].astype(str).str.strip()
             
             gelir = df_finans[df_finans["Tip"]=="Gelir"]["Tutar"].sum()
             gider = df_finans[df_finans["Tip"]=="Gider"]["Tutar"].sum()
@@ -375,19 +347,18 @@ elif menu == "💸 Kasa":
             st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
         else: st.info("Veri yok.")
 
-# --- 4. GEÇMİŞ (SADECE ADMIN) ---
+# --- 4. AYRIŞTIRILMIŞ GEÇMİŞ (SEKMELİ) ---
 elif menu == "📝 Geçmiş":
-    st.markdown("<h2 style='color: white;'>📝 Kulüp Aktivite Akışı</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: white;'>📝 Geçmiş Kayıtlar</h2>", unsafe_allow_html=True)
     
     # Tüm Logları Birleştirme
-    logs = df_logs.copy(); logs["Tip"] = "Ders"
+    logs = df_logs.copy(); logs["Tip"] = "Ders" # Varsayılan Tip
     fins = df_finans.copy()
     
     if not fins.empty:
         fins["Tutar"] = pd.to_numeric(fins["Tutar"], errors='coerce').fillna(0)
         fins_fmt = pd.DataFrame({
-            "Tarih": [str(x) for x in fins["Tarih"]],
-            "Saat": ["-"]*len(fins),
+            "Tarih": [str(x) for x in fins["Tarih"]], "Saat": ["-"]*len(fins),
             "Ogrenci": fins["Ogrenci"],
             "Islem": [f"Finans: {x}" for x in fins["Tip"]],
             "Detay": [f"{x:,.0f} TL - {y}" for x, y in zip(fins["Tutar"], fins["Not"])],
@@ -395,32 +366,58 @@ elif menu == "📝 Geçmiş":
         })
         master_log = pd.concat([logs, fins_fmt], ignore_index=True)
     else: master_log = logs
-    
+
+    # Misafirleri İşaretle (Çünkü logs tablosunda da olabilirler)
+    master_log.loc[master_log["Ogrenci"] == "Misafir", "Tip"] = "Ziyaret"
+
     if not master_log.empty:
         master_log = master_log.iloc[::-1] # En yeni en üstte
+
+        # --- SEKMELER ---
+        tab_all, tab_ders, tab_finans, tab_sys = st.tabs(["Tümü", "🎾 Ders Hareketleri", "💰 Finans Raporu", "👀 Ziyaretçi Logu"])
+
+        def render_timeline(df_subset):
+            if df_subset.empty:
+                st.info("Bu kategoride kayıt yok.")
+                return
+            
+            st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
+            for _, r in df_subset.head(50).iterrows():
+                # Stil
+                tip = r.get("Tip")
+                if tip == "Para": css = "t-money"; icon = "💰"
+                elif tip == "Gider": css = "t-sys"; icon = "📉"
+                elif tip == "Ziyaret": css = "t-sys"; icon = "👀"
+                else: css = "t-lesson"; icon = "🎾"
+                
+                st.markdown(f"""
+                <div class="timeline-item {css}">
+                    <span class="time-badge">{r['Tarih']} {r['Saat']}</span>
+                    <div class="log-title">{icon} {r['Ogrenci']} - {r['Islem']}</div>
+                    <div class="log-detail">{r['Detay']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with tab_all:
+            render_timeline(master_log)
         
-        st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
-        for _, r in master_log.head(50).iterrows(): # Son 50 işlem
-            # Stil Belirleme
-            if r.get("Tip") == "Para": css = "t-money"; icon = "💰"
-            elif r.get("Tip") == "Gider": css = "t-user"; icon = "📉"
-            else: css = "t-lesson"; icon = "🎾"
+        with tab_ders:
+            # Sadece ders ile ilgili olanlar (Misafir ve Finans hariç)
+            # Tip = "Ders" olanlar ama Öğrenci "Misafir" olmayanlar
+            df_d = master_log[(master_log["Tip"] == "Ders") & (master_log["Ogrenci"] != "Misafir")]
+            render_timeline(df_d)
             
-            # Ziyaretçi Logu Özel İkonu
-            if r["Ogrenci"] == "Misafir": css = "t-user"; icon = "👀"
+        with tab_finans:
+            # Para ve Gider
+            df_f = master_log[master_log["Tip"].isin(["Para", "Gider"])]
+            render_timeline(df_f)
             
-            # Yeni Kayıt İkonu
-            if "İlk Kayıt" in str(r.get("Detay")) or "İlk Kayıt" in str(r.get("Islem")): 
-                css = "t-user"; icon = "🆕"
-            
-            st.markdown(f"""
-            <div class="timeline-item {css}">
-                <span class="time-badge">{r['Tarih']} {r['Saat']}</span>
-                <div class="log-title">{icon} {r['Ogrenci']} - {r['Islem']}</div>
-                <div class="log-detail">{r['Detay']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        with tab_sys:
+            # Sadece Ziyaretçiler
+            df_s = master_log[master_log["Tip"] == "Ziyaret"]
+            render_timeline(df_s)
+
     else:
         st.info("Henüz bir hareketlilik yok.")
 
