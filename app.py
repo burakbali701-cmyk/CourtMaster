@@ -6,9 +6,10 @@ import plotly.express as px
 from datetime import datetime
 import time
 
-# --- AYARLAR & TASARIM ---
+# --- AYARLAR ---
 st.set_page_config(page_title="Tennis App", page_icon="🎾", layout="wide")
 
+# --- TASARIM (CSS) ---
 st.markdown("""
     <style>
     .main {background-color: #0b140f;}
@@ -57,37 +58,31 @@ def baglanti_kur():
     else:
         creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
     client = gspread.authorize(creds)
-    # DOSYA ADINI BURADAN KONTROL ET (Senin dosyanın adı neyse onu yaz)
     return client.open("CourtMaster_DB")
 
-# --- OTOMATİK KURULUM VE VERİ ÇEKME ---
-def get_worksheet_or_create(sheet_obj, name, columns):
-    """Sayfa yoksa oluşturur, varsa getirir. Başlık yoksa ekler."""
+# --- AKILLI KURULUM SİSTEMİ ---
+def setup_worksheet(sheet, name, columns):
     try:
-        ws = sheet_obj.worksheet(name)
-        # Sayfa boşsa başlıkları ekle
-        if not ws.get_all_values():
+        ws = sheet.worksheet(name)
+        if not ws.get_all_values(): # Sayfa var ama boşsa
             ws.append_row(columns)
-            # Eğer Ders_Programi ise saatleri de ekle
             if name == "Ders_Programi":
                 saatler = [[f"{h:02d}:00"] + [""]*7 for h in range(8, 24)]
                 ws.append_rows(saatler)
-        return ws
-    except gspread.WorksheetNotFound:
-        # Sayfa yoksa oluştur
-        ws = sheet_obj.add_worksheet(title=name, rows="1000", cols="20")
+    except:
+        ws = sheet.add_worksheet(title=name, rows="1000", cols="20")
         ws.append_row(columns)
         if name == "Ders_Programi":
             saatler = [[f"{h:02d}:00"] + [""]*7 for h in range(8, 24)]
             ws.append_rows(saatler)
-        return ws
+    return ws
 
-@st.cache_data(ttl=1)
+# --- VERİ ÇEKME (HIZ LİMİTİ KORUMALI: TTL=15) ---
+@st.cache_data(ttl=15)
 def get_data_cached(worksheet_name, expected_columns):
     try:
         sheet = baglanti_kur()
-        # Otomatik kurulum fonksiyonunu çağır
-        ws = get_worksheet_or_create(sheet, worksheet_name, expected_columns)
+        ws = setup_worksheet(sheet, worksheet_name, expected_columns) # Önce kurulumu kontrol et
         
         all_values = ws.get_all_values()
         
@@ -101,7 +96,7 @@ def get_data_cached(worksheet_name, expected_columns):
                 
         df = pd.DataFrame(clean_data, columns=expected_columns)
         
-        # Sayısal Temizlik
+        # Sayı düzeltmeleri
         if "Tutar" in df.columns:
             df["Tutar"] = df["Tutar"].astype(str).str.strip().str.replace(',', '.', regex=False)
             df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
@@ -110,16 +105,15 @@ def get_data_cached(worksheet_name, expected_columns):
             
         return df
     except Exception as e:
-        st.error(f"Veri hatası: {e}")
         return pd.DataFrame(columns=expected_columns)
 
 def save_data(df, worksheet_name, columns):
-    sheet = baglanti_kur(); ws = get_worksheet_or_create(sheet, worksheet_name, columns)
+    sheet = baglanti_kur(); ws = setup_worksheet(sheet, worksheet_name, columns)
     ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
     st.cache_data.clear()
 
 def append_data(row_data, worksheet_name, columns):
-    sheet = baglanti_kur(); ws = get_worksheet_or_create(sheet, worksheet_name, columns)
+    sheet = baglanti_kur(); ws = setup_worksheet(sheet, worksheet_name, columns)
     clean_row = []
     for x in row_data:
         if isinstance(x, (int, float)): clean_row.append(x)
@@ -127,13 +121,13 @@ def append_data(row_data, worksheet_name, columns):
     ws.append_row(clean_row)
     st.cache_data.clear()
 
-# --- SÜTUNLAR ---
+# --- SÜTUN YAPILARI ---
 COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
 COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
 COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
 COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# --- 🕵️‍♂️ ZİYARETÇİ TAKİP ---
+# --- GİZLİ MİSAFİR LOGU ---
 if "ziyaret_kaydedildi" not in st.session_state:
     try:
         tarih = datetime.now().strftime("%d-%m-%Y")
@@ -155,7 +149,7 @@ with st.sidebar:
     else:
         menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
-# Verileri Çek (Eğer yoksa oluşturur)
+# Verileri Çek
 df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
 df_finans = get_data_cached("Finans_Kasa", COL_FINANS)
 df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
