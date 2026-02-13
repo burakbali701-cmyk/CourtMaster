@@ -27,7 +27,7 @@ st.markdown("""
         text-align: center; margin-bottom: 15px;
     }
     
-    /* Timeline (Zaman Tüneli) - Şık Loglar */
+    /* Timeline (Zaman Tüneli) */
     .timeline-container {
         border-left: 2px solid #333; padding-left: 20px; margin-left: 10px;
     }
@@ -82,7 +82,7 @@ def baglanti_kur():
     client = gspread.authorize(creds)
     return client.open("CourtMaster_DB")
 
-# --- VERİ FONKSİYONLARI (KÖR OKUMA / BLIND READ) ---
+# --- VERİ FONKSİYONLARI ---
 def get_worksheet(sheet_obj, name, columns):
     try: return sheet_obj.worksheet(name)
     except gspread.WorksheetNotFound:
@@ -131,6 +131,24 @@ def append_data(row_data, worksheet_name, columns):
     ws.append_row(clean_row)
     st.cache_data.clear()
 
+# --- SÜTUNLAR ---
+COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
+COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
+COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
+COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+
+# --- 🕵️‍♂️ GİZLİ ZİYARETÇİ LOG SİSTEMİ ---
+# Sayfa her yüklendiğinde değil, oturum başına 1 kez çalışır.
+if "ziyaret_kaydedildi" not in st.session_state:
+    try:
+        tarih = datetime.now().strftime("%d-%m-%Y")
+        saat = datetime.now().strftime("%H:%M")
+        # Kimseye hissettirmeden veritabanına yaz
+        append_data([tarih, saat, "Misafir", "Giriş", "Sayfa Görüntülendi"], "Ders_Gecmisi", COL_LOG)
+        st.session_state["ziyaret_kaydedildi"] = True
+    except:
+        pass # Hata olursa akışı bozma
+
 # --- ARAYÜZ ---
 with st.sidebar:
     st.markdown("<h1 style='color: #ccff00; text-align: center;'>Tennis App</h1>", unsafe_allow_html=True)
@@ -139,18 +157,12 @@ with st.sidebar:
         else: st.session_state["admin"] = False
     IS_ADMIN = st.session_state.get("admin", False)
     
-    # MENÜ YAPILANDIRMASI: "Geçmiş" artık herkese açık!
+    # MENÜ AYARI: Geçmiş ve Kasa SADECE Admin'e açık
     if IS_ADMIN:
         menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Kasa", "📝 Geçmiş"])
     else:
-        # Normal kullanıcılar da Geçmişi görebilir
-        menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "📝 Geçmiş"])
-
-# Sütun Tanımları
-COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
-COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
-COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
-COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+        # Normal kullanıcılar Geçmişi GÖREMEZ
+        menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
 # Verileri Çek
 df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
@@ -233,7 +245,7 @@ elif menu == "👥 Sporcular":
                 
                 b_odeme_cls = "badge-paid" if odeme == "Ödendi" else "badge-unpaid"
 
-                # PROFİL BAŞLIĞI (ÖDEME DURUMU BURADA)
+                # PROFİL BAŞLIĞI
                 st.markdown(f"""
                 <div style="background:#1e211e; padding:20px; border-radius:15px; border-left:5px solid #ccff00; margin-bottom:20px;">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -257,7 +269,7 @@ elif menu == "👥 Sporcular":
                         y_tutar = st.number_input("Tahsilat Yap (TL)", 0.0, step=100.0)
                         y_not = st.text_area("Notlar", str(df_main.at[idx, "Notlar"]))
                         
-                        # Dondurma Butonları (Form dışında daha iyi ama form içinde de olur)
+                        # Dondurma Checkbox
                         if durum == "Aktif":
                             dondur = st.checkbox("❄️ Kaydı Dondur")
                         else:
@@ -277,8 +289,8 @@ elif menu == "👥 Sporcular":
                             
                             # Durum Yönetimi
                             if dondur and durum == "Aktif": df_main.at[idx, "Durum"] = "Donduruldu"
-                            elif not dondur and durum == "Donduruldu": pass # Zaten dondurulmuş
-                            elif dondur and durum == "Donduruldu": df_main.at[idx, "Durum"] = "Aktif" # Checkbox mantığı ters çalışır burada
+                            elif not dondur and durum == "Donduruldu": pass
+                            elif dondur and durum == "Donduruldu": df_main.at[idx, "Durum"] = "Aktif"
                             elif df_main.at[idx, "Kalan Ders"] > 0: df_main.at[idx, "Durum"] = "Aktif"
 
                             save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
@@ -286,7 +298,6 @@ elif menu == "👥 Sporcular":
 
                 with col_R:
                     st.markdown("#### 📜 Kişisel Geçmiş")
-                    # Kişisel log mantığı
                     logs = df_logs[df_logs["Ogrenci"]==secilen].copy(); logs["Tip"] = "Ders"
                     fins = df_finans[(df_finans["Ogrenci"]==secilen) & (df_finans["Tip"]=="Gelir")].copy()
                     if not fins.empty:
@@ -328,7 +339,7 @@ elif menu == "👥 Sporcular":
                     st.success("Eklendi"); time.sleep(0.5); st.rerun()
     else: st.dataframe(df_main, use_container_width=True)
 
-# --- 3. FİNANS ---
+# --- 3. FİNANS (KÖR OKUMA - T KOD) ---
 elif menu == "💸 Kasa":
     st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
@@ -364,17 +375,16 @@ elif menu == "💸 Kasa":
             st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
         else: st.info("Veri yok.")
 
-# --- 4. GEÇMİŞ (HERKESE AÇIK & BİRLEŞTİRİLMİŞ) ---
+# --- 4. GEÇMİŞ (SADECE ADMIN) ---
 elif menu == "📝 Geçmiş":
     st.markdown("<h2 style='color: white;'>📝 Kulüp Aktivite Akışı</h2>", unsafe_allow_html=True)
     
-    # Tüm Logları Birleştirme Mantığı
+    # Tüm Logları Birleştirme
     logs = df_logs.copy(); logs["Tip"] = "Ders"
     fins = df_finans.copy()
     
     if not fins.empty:
         fins["Tutar"] = pd.to_numeric(fins["Tutar"], errors='coerce').fillna(0)
-        # Sadece Gelirleri veya tüm finansı gösterebiliriz. Şimdilik hepsini gösterelim.
         fins_fmt = pd.DataFrame({
             "Tarih": [str(x) for x in fins["Tarih"]],
             "Saat": ["-"]*len(fins),
@@ -386,7 +396,6 @@ elif menu == "📝 Geçmiş":
         master_log = pd.concat([logs, fins_fmt], ignore_index=True)
     else: master_log = logs
     
-    # Sıralama (Tarih bazlı basit sıralama)
     if not master_log.empty:
         master_log = master_log.iloc[::-1] # En yeni en üstte
         
@@ -396,6 +405,9 @@ elif menu == "📝 Geçmiş":
             if r.get("Tip") == "Para": css = "t-money"; icon = "💰"
             elif r.get("Tip") == "Gider": css = "t-user"; icon = "📉"
             else: css = "t-lesson"; icon = "🎾"
+            
+            # Ziyaretçi Logu Özel İkonu
+            if r["Ogrenci"] == "Misafir": css = "t-user"; icon = "👀"
             
             # Yeni Kayıt İkonu
             if "İlk Kayıt" in str(r.get("Detay")) or "İlk Kayıt" in str(r.get("Islem")): 
