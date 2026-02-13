@@ -26,7 +26,7 @@ st.markdown("""
         padding: 15px; border-radius: 15px; color: white; text-align: center; margin-bottom: 10px;
     }
     
-    /* Timeline (Log Akışı) */
+    /* Timeline */
     .timeline-item {
         background: rgba(255, 255, 255, 0.03); border-left: 4px solid #ccff00;
         padding: 10px 15px; margin-bottom: 8px; border-radius: 4px; color: #ddd; font-size: 0.9em;
@@ -80,7 +80,7 @@ def get_data_cached(worksheet_name, columns):
             for col in columns:
                 if col not in df.columns: df[col] = "-"
             
-            # --- ZORLAYICI SAYI ÇEVİRİCİ ---
+            # T Kod'un çalışması için arka plan temizliği
             if "Tutar" in df.columns:
                 df["Tutar"] = df["Tutar"].astype(str).str.replace(',', '.', regex=False)
                 df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
@@ -96,7 +96,6 @@ def save_data(df, worksheet_name, columns):
 
 def append_data(row_data, worksheet_name, columns):
     sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
-    # Veri tiplerini temizle (JSON hatasını önler)
     clean_row = []
     for x in row_data:
         if isinstance(x, (int, float)): clean_row.append(x)
@@ -111,7 +110,7 @@ with st.sidebar:
         if st.text_input("Şifre", type="password") == ADMIN_SIFRE: st.session_state["admin"] = True
         else: st.session_state["admin"] = False
     IS_ADMIN = st.session_state.get("admin", False)
-    menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Finans", "📝 Loglar"] if IS_ADMIN else ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
+    menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Kasa", "📝 Loglar"] if IS_ADMIN else ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
 # Sütunlar
 COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
@@ -124,7 +123,7 @@ df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
 df_finans = get_data_cached("Finans_Kasa", COL_FINANS)
 df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
 
-# --- 1. KORT PANELİ (SİLME, GERİ ALMA VAR) ---
+# --- 1. KORT PANELİ (GELİŞMİŞ - SİLME/GERİ ALMA VAR) ---
 if menu == "🏠 Kort Paneli":
     st.markdown("<h2 style='color: white;'>🎾 Kort Yönetimi</h2>", unsafe_allow_html=True)
     aktif = df_main[df_main["Durum"]=="Aktif"]
@@ -180,7 +179,7 @@ if menu == "🏠 Kort Paneli":
                         st.warning("Silindi"); time.sleep(1); st.rerun()
     else: st.info("Kortta kimse yok.")
 
-# --- 2. SPORCULAR (GELİŞMİŞ PROFİL + TIMELINE) ---
+# --- 2. SPORCULAR (GELİŞMİŞ PROFİL & TIMELINE) ---
 elif menu == "👥 Sporcular":
     st.markdown("<h2 style='color: white;'>👥 Oyuncu Profilleri</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
@@ -206,7 +205,6 @@ elif menu == "👥 Sporcular":
                             df_main.at[idx, "Durum"] = "Aktif"
                             save_data(df_main, "Ogrenci_Data", COL_OGRENCI); st.rerun()
 
-                # İKİYE BÖLÜNMÜŞ EKRAN
                 col_L, col_R = st.columns([1, 1.2])
                 
                 # SOL: İŞLEMLER
@@ -217,7 +215,8 @@ elif menu == "👥 Sporcular":
                         ek = st.number_input("➕ Paket Ekle (Ders)", 0, step=1)
                         
                         st.markdown("---")
-                        y_odeme = st.selectbox("Ödeme Durumu", ["Ödenmedi", "Ödendi"], index=0 if odeme=="Ödenmedi" else 1)
+                        st.write("**💰 Ödeme & Tahsilat**")
+                        y_odeme = st.selectbox("Durum", ["Ödenmedi", "Ödendi"], index=0 if odeme=="Ödenmedi" else 1)
                         y_tutar = st.number_input("Tahsilat Yap (TL)", 0.0, step=100.0)
                         y_not = st.text_area("Notlar", str(df_main.at[idx, "Notlar"]))
                         
@@ -229,7 +228,7 @@ elif menu == "👥 Sporcular":
                             if y_tutar > 0:
                                 append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), secilen, float(y_tutar), "Ödeme Alındı", "Gelir"], "Finans_Kasa", COL_FINANS)
                                 append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), secilen, "Ödeme", f"{y_tutar} TL"], "Ders_Gecmisi", COL_LOG)
-                                y_odeme = "Ödendi" # Para girdiyse ödendi yap
+                                y_odeme = "Ödendi"
                             
                             df_main.at[idx, "Odeme Durumu"] = y_odeme
                             df_main.at[idx, "Notlar"] = y_not
@@ -242,12 +241,15 @@ elif menu == "👥 Sporcular":
                 # SAĞ: TIMELINE
                 with col_R:
                     st.markdown("#### 📜 Geçmiş Akışı")
-                    # Logları birleştir
                     logs = df_logs[df_logs["Ogrenci"]==secilen].copy()
                     logs["Tip"] = "Ders"
                     
                     fins = df_finans[(df_finans["Ogrenci"]==secilen) & (df_finans["Tip"]=="Gelir")].copy()
+                    
                     if not fins.empty:
+                        fins["Tutar"] = fins["Tutar"].astype(str).str.replace(',', '.', regex=False)
+                        fins["Tutar"] = pd.to_numeric(fins["Tutar"], errors='coerce').fillna(0)
+                        
                         fins_fmt = pd.DataFrame({
                             "Tarih": [str(x) for x in fins["Tarih"]],
                             "Saat": ["-"]*len(fins),
@@ -264,7 +266,7 @@ elif menu == "👥 Sporcular":
                         for _, r in full_log.head(15).iterrows():
                             cls = "timeline-money" if r.get("Tip")=="Para" else "timeline-lesson"
                             icon = "💰" if r.get("Tip")=="Para" else "🎾"
-                            st.markdown(f"""<div class="timeline-item {cls}"><span class="timeline-date">{r['Tarih']}</span><b>{icon} {r['Islem']}</b>: {r['Detay']}</div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class="timeline-item {cls}"><span class="timeline-date">{r['Tarih']} {r['Saat']}</span><b>{icon} {r['Islem']}</b>: {r['Detay']}</div>""", unsafe_allow_html=True)
                     else: st.info("Kayıt yok.")
 
         with t2:
@@ -284,44 +286,38 @@ elif menu == "👥 Sporcular":
                     st.success("Eklendi"); time.sleep(0.5); st.rerun()
     else: st.dataframe(df_main, use_container_width=True)
 
-# --- 3. FİNANS (SADE & SAĞLAM) ---
-elif menu == "💸 Finans":
+# --- 3. FİNANS (T KOD VERSİYONU - ORİJİNAL) ---
+elif menu == "💸 Kasa":
     st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
-        if not df_finans.empty:
-            if "Tip" not in df_finans.columns: df_finans["Tip"] = "Gelir"
-            df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
+        df_f = get_data_cached("Finans_Kasa", COL_FINANS)
+        
+        with st.expander("➕ Gelir/Gider Ekle", expanded=True):
+            with st.form("kasa"):
+                c1, c2 = st.columns(2)
+                tutar = c1.number_input("Tutar", 0.0)
+                tip = c1.selectbox("Tip", ["Gelir", "Gider"])
+                not_ = c2.text_input("Açıklama")
+                if st.form_submit_button("KAYDET"):
+                    append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), "Genel", float(tutar), not_, tip], "Finans_Kasa", COL_FINANS); st.rerun()
+        
+        if not df_f.empty:
+            gelir = df_f[df_f["Tip"]=="Gelir"]["Tutar"].sum()
+            gider = df_f[df_f["Tip"]=="Gider"]["Tutar"].sum()
+            col1, col2, col3 = st.columns(3)
+            col1.metric("GELİR", f"{gelir:,.0f} TL")
+            col2.metric("GİDER", f"{gider:,.0f} TL")
+            col3.metric("NET", f"{gelir-gider:,.0f} TL")
             
-            gelir = df_finans[df_finans["Tip"]=="Gelir"]["Tutar"].sum()
-            gider = df_finans[df_finans["Tip"]=="Gider"]["Tutar"].sum()
-            
-            c1, c2, c3 = st.columns(3)
-            c1.metric("GELİR", f"{gelir:,.0f} TL")
-            c2.metric("GİDER", f"{gider:,.0f} TL")
-            c3.metric("NET", f"{gelir-gider:,.0f} TL")
-            
-            st.markdown("---")
-            col_add, col_graph = st.columns([1, 1.5])
-            
-            with col_add:
-                st.markdown("#### ➕ Hızlı Ekle")
-                with st.form("fin_hizli"):
-                    ft = st.number_input("Tutar", 0.0)
-                    ftp = st.selectbox("Tür", ["Gelir", "Gider"])
-                    fa = st.text_input("Açıklama", "Genel")
-                    if st.form_submit_button("EKLE"):
-                        append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), "Genel", float(ft), fa, ftp], "Finans_Kasa", COL_FINANS)
-                        st.rerun()
-            
-            with col_graph:
-                gf = df_finans[df_finans["Tip"]=="Gelir"]
-                if not gf.empty:
-                    fig = px.pie(gf, values="Tutar", names="Ogrenci", title="Gelir Dağılımı", hole=0.4, color_discrete_sequence=px.colors.sequential.Greens_r)
-                    fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
-        else: st.info("Finans verisi yok.")
+            # Grafikler
+            g_col1, g_col2 = st.columns(2)
+            gf = df_f[df_f["Tip"]=="Gelir"]
+            if not gf.empty:
+                g_col1.plotly_chart(px.bar(gf.groupby("Ay")["Tutar"].sum().reset_index(), x="Ay", y="Tutar", title="Aylık Gelir", color_discrete_sequence=['#ccff00']), use_container_width=True)
+                g_col2.plotly_chart(px.pie(gf.groupby("Ogrenci")["Tutar"].sum().reset_index(), values="Tutar", names="Ogrenci", title="Gelir Dağılımı"), use_container_width=True)
+            st.dataframe(df_f.sort_index(ascending=False), use_container_width=True)
+        else:
+            st.warning("Kasa boş.")
 
 # --- DİĞER ---
 elif menu == "📅 Çizelge":
