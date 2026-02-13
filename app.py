@@ -69,8 +69,11 @@ def get_data_cached(worksheet_name, columns):
         else:
             for col in columns:
                 if col not in df.columns: df[col] = "-"
-            if "Tutar" in df.columns: df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
-            if "Kalan Ders" in df.columns: df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
+            # Sayısal dönüşüm (Hata önleyici)
+            if "Tutar" in df.columns: 
+                df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
+            if "Kalan Ders" in df.columns: 
+                df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
         return df
     except: return pd.DataFrame(columns=columns)
 
@@ -127,7 +130,7 @@ if menu == "🏠 Kort Paneli":
                 st.rerun()
     else: st.info("Sporcu kaydı bulunamadı.")
 
-# --- 2. SPORCULAR (DÜZELTİLDİ: CANLI DURUM GÖSTERGESİ) ---
+# --- 2. SPORCULAR (YENİ SPORCU ALANI DÜZELTİLDİ) ---
 elif menu == "👥 Sporcular":
     st.markdown("<h2 style='color: white;'>👥 Sporcu Yönetimi</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
@@ -137,8 +140,9 @@ elif menu == "👥 Sporcular":
             if secilen != "Seçiniz...":
                 idx = df_main[df_main["Ad Soyad"] == secilen].index[0]
                 
-                # --- CANLI DURUM KARTI (YENİ EKLENDİ) ---
-                # Toplam ödeme hesapla
+                # --- CANLI DURUM KARTI ---
+                # Toplam ödeme hesapla (Veri tipini garantiye al)
+                df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
                 toplam_odeme = df_finans[(df_finans["Ogrenci"] == secilen) & (df_finans["Tip"] == "Gelir")]["Tutar"].sum()
                 
                 st.markdown(f"#### 📊 {secilen} - Mevcut Durum")
@@ -152,9 +156,9 @@ elif menu == "👥 Sporcular":
                 st.markdown("#### ✏️ Bilgileri Güncelle")
                 with st.form(f"prof_{secilen}"):
                     c1, c2 = st.columns(2)
-                    y_ders = c1.number_input("Yeni Ders Sayısı (Üstüne Eklemez, Günceller)", value=int(df_main.at[idx, "Kalan Ders"]))
+                    y_ders = c1.number_input("Yeni Ders Sayısı (Günceller)", value=int(df_main.at[idx, "Kalan Ders"]))
                     y_odeme = c1.selectbox("Ödeme Durumu", ["Ödenmedi", "Ödendi"], index=0 if df_main.at[idx, "Odeme Durumu"]=="Ödenmedi" else 1)
-                    y_tut = c2.number_input("Şu An Tahsilat Yapıldıysa Tutar Girin (TL)", 0.0)
+                    y_tut = c2.number_input("Tahsilat Yap (Kasaya İşler)", 0.0, step=100.0)
                     y_not = st.text_area("Notlar", value=str(df_main.at[idx, "Notlar"]))
                     
                     if st.form_submit_button("KAYDET VE GÜNCELLE"):
@@ -172,40 +176,79 @@ elif menu == "👥 Sporcular":
                         st.rerun()
 
         with t2:
+            st.markdown("#### 🆕 Yeni Sporcu Kaydı")
             with st.form("new"):
-                ad = st.text_input("Ad Soyad")
-                p = st.number_input("Paket", 10)
-                if st.form_submit_button("EKLE"):
-                    new_r = {"Ad Soyad": ad, "Paket (Ders)": p, "Kalan Ders": p, "Son Islem": "-", "Durum": "Aktif", "Odeme Durumu": "Ödenmedi", "Notlar": "-"}
-                    df_main = pd.concat([df_main, pd.DataFrame([new_r])], ignore_index=True)
-                    save_data(df_main, "Ogrenci_Data", COL_OGRENCI); st.rerun()
+                c1, c2 = st.columns(2)
+                ad = c1.text_input("Ad Soyad")
+                p = c2.number_input("Paket (Ders Sayısı)", min_value=1, value=10)
+                
+                st.markdown("---")
+                st.markdown("##### 💰 İlk Ödeme Bilgisi")
+                ucret = st.number_input("Başlangıç Ücreti (TL)", min_value=0.0, step=100.0)
+                ilk_durum = st.selectbox("Ödeme Durumu", ["Ödenmedi", "Ödendi"])
+                
+                if st.form_submit_button("SİSTEME EKLE"):
+                    if ad:
+                        # 1. Öğrenci Listesine Ekle
+                        new_r = {"Ad Soyad": ad, "Paket (Ders)": p, "Kalan Ders": p, "Son Islem": "-", "Durum": "Aktif", "Odeme Durumu": ilk_durum, "Notlar": "-"}
+                        df_main = pd.concat([df_main, pd.DataFrame([new_r])], ignore_index=True)
+                        save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                        
+                        # 2. Ücret Varsa Kasaya Ekle
+                        if ucret > 0:
+                            append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), ad, ucret, "İlk Kayıt Ücreti", "Gelir"], "Finans_Kasa", COL_FINANS)
+                        
+                        st.success(f"{ad} başarıyla eklendi!")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Lütfen isim giriniz.")
     else: st.dataframe(df_main[["Ad Soyad", "Kalan Ders", "Odeme Durumu"]], use_container_width=True)
 
-# --- 3. KASA ---
+# --- 3. KASA (GRAFİKLER VE TOPLAMLAR FİXLENDİ) ---
 elif menu == "💸 Kasa":
     st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
         with st.expander("➕ Gelir/Gider Ekle"):
             with st.form("kasa"):
                 c1, c2 = st.columns(2)
-                tutar = c1.number_input("Tutar", 0.0)
+                tutar = c1.number_input("Tutar", 0.0, step=100.0)
                 tip = c1.selectbox("Tip", ["Gelir", "Gider"])
                 not_ = c2.text_input("Açıklama")
                 if st.form_submit_button("KAYDET"):
                     append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), "Genel", tutar, not_, tip], "Finans_Kasa", COL_FINANS); st.rerun()
         
+        # VERİ TİPİ DÜZELTME (KRİTİK)
         if not df_finans.empty:
+            # Tip sütunu yoksa varsayılan olarak 'Gelir' ata
+            if "Tip" not in df_finans.columns:
+                df_finans["Tip"] = "Gelir"
+            
+            # Tutar sütununu kesinlikle sayıya çevir
+            df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
+            
             gelir = df_finans[df_finans["Tip"]=="Gelir"]["Tutar"].sum()
             gider = df_finans[df_finans["Tip"]=="Gider"]["Tutar"].sum()
-            col1, col2, col3 = st.columns(3)
-            col1.metric("GELİR", f"{gelir:,.0f} TL")
-            col2.metric("GİDER", f"{gider:,.0f} TL")
-            col3.metric("NET", f"{gelir-gider:,.0f} TL")
             
+            col1, col2, col3 = st.columns(3)
+            col1.metric("TOPLAM GELİR", f"{gelir:,.0f} TL")
+            col2.metric("TOPLAM GİDER", f"{gider:,.0f} TL", delta_color="inverse")
+            col3.metric("NET KASA", f"{gelir-gider:,.0f} TL")
+            
+            st.markdown("---")
             g_col1, g_col2 = st.columns(2)
-            g_col1.plotly_chart(px.bar(df_finans[df_finans["Tip"]=="Gelir"].groupby("Ay")["Tutar"].sum().reset_index(), x="Ay", y="Tutar", title="Aylık Gelir", color_discrete_sequence=['#ccff00']), use_container_width=True)
-            g_col2.plotly_chart(px.pie(df_finans[df_finans["Tip"]=="Gelir"].groupby("Ogrenci")["Tutar"].sum().reset_index(), values="Tutar", names="Ogrenci", title="Gelir Dağılımı"), use_container_width=True)
+            
+            # Grafik 1: Aylık Gelir
+            gelir_df = df_finans[df_finans["Tip"]=="Gelir"]
+            if not gelir_df.empty:
+                g_col1.plotly_chart(px.bar(gelir_df.groupby("Ay")["Tutar"].sum().reset_index(), x="Ay", y="Tutar", title="Aylık Gelir", color_discrete_sequence=['#ccff00']), use_container_width=True)
+                g_col2.plotly_chart(px.pie(gelir_df.groupby("Ogrenci")["Tutar"].sum().reset_index(), values="Tutar", names="Ogrenci", title="Gelir Dağılımı"), use_container_width=True)
+            else:
+                st.info("Henüz grafik oluşturacak gelir verisi yok.")
+                
             st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
+        else:
+            st.warning("Kasa verisi boş.")
 
 # --- 4. PROGRAM & GEÇMİŞ ---
 elif menu == "📅 Çizelge":
