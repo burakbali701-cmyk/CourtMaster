@@ -82,7 +82,7 @@ def baglanti_kur():
     client = gspread.authorize(creds)
     return client.open("CourtMaster_DB")
 
-# --- VERİ FONKSİYONLARI ---
+# --- VERİ FONKSİYONLARI (KÖR OKUMA / BLIND READ) ---
 def get_worksheet(sheet_obj, name, columns):
     try: return sheet_obj.worksheet(name)
     except gspread.WorksheetNotFound:
@@ -107,6 +107,7 @@ def get_data_cached(worksheet_name, expected_columns):
                 
         df = pd.DataFrame(clean_data, columns=expected_columns)
         
+        # Sayısal Temizlik (Hata Önleyici)
         if "Tutar" in df.columns:
             df["Tutar"] = df["Tutar"].astype(str).str.strip().str.replace(',', '.', regex=False)
             df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
