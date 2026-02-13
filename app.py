@@ -19,26 +19,19 @@ st.markdown("""
         border: none; transition: 0.3s;
     }
     .stButton>button:hover {background-color: #e6ff80; transform: scale(1.02);}
-    
-    /* Kartlar */
     .player-card {
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(204, 255, 0, 0.2);
         padding: 20px; border-radius: 20px; color: white;
         text-align: center; margin-bottom: 15px;
     }
-    
-    /* Timeline Items */
     .timeline-item {
         background: rgba(255, 255, 255, 0.03); border-left: 4px solid #ccff00;
         padding: 10px 15px; margin-bottom: 8px; border-radius: 4px; color: #ddd; font-size: 0.9em;
     }
     .timeline-money { border-left-color: #00e676 !important; } 
-    .timeline-lesson { border-left-color: #ccff00 !important; } 
-    
-    /* Rozetler */
+    .timeline-lesson { border-left-color: #ccff00 !important; }
     .badge-paid { background-color: #00e676; color: black; padding: 4px 10px; border-radius: 10px; font-weight: bold; }
     .badge-unpaid { background-color: #ff4b4b; color: white; padding: 4px 10px; border-radius: 10px; font-weight: bold; }
-    
     [data-testid="stSidebar"] {background-color: #080f0b; border-right: 1px solid #ccff0033;}
     </style>
     """, unsafe_allow_html=True)
@@ -46,7 +39,7 @@ st.markdown("""
 # --- YÖNETİCİ ŞİFRESİ ---
 ADMIN_SIFRE = "1234"
 
-# --- GOOGLE SHEETS BAĞLANTISI ---
+# --- GOOGLE BAĞLANTISI ---
 @st.cache_resource
 def baglanti_kur():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -67,27 +60,52 @@ def get_worksheet(sheet_obj, name, columns):
         new_ws.append_row(columns)
         return new_ws
 
-@st.cache_data(ttl=2)
-def get_data_cached(worksheet_name, columns):
+@st.cache_data(ttl=1)
+def get_data_cached(worksheet_name, expected_columns):
+    """
+    Bu fonksiyon artık başlık isimlerine GÜVENMEZ.
+    Sütun sırasına göre okur. Bu sayede 'Tip' sütunu kaymış olsa bile
+    6. sıradaki veriyi 'Tip' olarak kabul eder.
+    """
     try:
         sheet = baglanti_kur()
-        ws = get_worksheet(sheet, worksheet_name, columns)
-        data = ws.get_all_records()
-        df = pd.DataFrame(data)
-        if df.empty: df = pd.DataFrame(columns=columns)
-        else:
-            for col in columns:
-                if col not in df.columns: df[col] = "-"
+        ws = get_worksheet(sheet, worksheet_name, expected_columns)
+        
+        # get_all_records yerine get_all_values kullanıyoruz (Header bağımsız okuma)
+        all_values = ws.get_all_values()
+        
+        if len(all_values) < 2: # Sadece başlık varsa veya boşsa
+            return pd.DataFrame(columns=expected_columns)
             
-            # --- T-KOD İÇİN GÜVENLİK ---
-            # Finans bölümünün hatasız çalışması için sayıları burada garantiye alıyoruz
-            if "Tutar" in df.columns:
-                df["Tutar"] = df["Tutar"].astype(str).str.replace(',', '.', regex=False)
-                df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
-            if "Kalan Ders" in df.columns: 
-                df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
+        # İlk satır başlıktır, veriyi 2. satırdan itibaren al
+        data = all_values[1:]
+        
+        # Veriyi DataFrame'e çevirirken bizim belirlediğimiz sütun isimlerini zorla
+        # Eğer sheet'te fazla sütun varsa kırp, eksikse None ekle
+        clean_data = []
+        for row in data:
+            # Satırı beklenen uzunluğa getir
+            if len(row) >= len(expected_columns):
+                clean_data.append(row[:len(expected_columns)])
+            else:
+                clean_data.append(row + [None]*(len(expected_columns)-len(row)))
+                
+        df = pd.DataFrame(clean_data, columns=expected_columns)
+        
+        # --- VERİ TİPİ DÜZELTME ---
+        if "Tutar" in df.columns:
+            # Temizlik: boşlukları sil, virgülü nokta yap
+            df["Tutar"] = df["Tutar"].astype(str).str.strip().str.replace(',', '.', regex=False)
+            df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
+            
+        if "Kalan Ders" in df.columns:
+            df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
+            
         return df
-    except: return pd.DataFrame(columns=columns)
+    except Exception as e:
+        # Hata olursa boş dön ama hatayı konsola bas (streamlit logs)
+        print(f"Veri çekme hatası: {e}") 
+        return pd.DataFrame(columns=expected_columns)
 
 def save_data(df, worksheet_name, columns):
     sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
@@ -96,7 +114,6 @@ def save_data(df, worksheet_name, columns):
 
 def append_data(row_data, worksheet_name, columns):
     sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
-    # Temiz veri gönderimi
     clean_row = []
     for x in row_data:
         if isinstance(x, (int, float)): clean_row.append(x)
@@ -106,17 +123,17 @@ def append_data(row_data, worksheet_name, columns):
 
 # --- ARAYÜZ ---
 with st.sidebar:
-    st.markdown("<h1 style='color: #ccff00; text-align: center;'>Tennis App</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='color: #ccff00; text-align: center;'>TENNIS APP</h1>", unsafe_allow_html=True)
     with st.expander("🔐 Giriş"):
         if st.text_input("Şifre", type="password") == ADMIN_SIFRE: st.session_state["admin"] = True
         else: st.session_state["admin"] = False
     IS_ADMIN = st.session_state.get("admin", False)
-    # Menü ismini "Kasa" olarak güncelledim ki senin kodunla uyumlu olsun
     menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Kasa", "📝 Loglar"] if IS_ADMIN else ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
-# Sütun Tanımları
+# Sütun Tanımları (SIRALAMA ÇOK ÖNEMLİ)
+# Google Sheets'te sütun sırası tam olarak böyle olmalı:
 COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
-COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
+COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"] # 0:Tarih, 1:Ay, 2:Ogr, 3:Tutar, 4:Not, 5:Tip
 COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
 COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
@@ -125,7 +142,7 @@ df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
 df_finans = get_data_cached("Finans_Kasa", COL_FINANS)
 df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
 
-# --- 1. KORT PANELİ (GELİŞMİŞ SÜRÜM) ---
+# --- 1. KORT PANELİ ---
 if menu == "🏠 Kort Paneli":
     st.markdown("<h2 style='color: white;'>🎾 Kort Yönetimi</h2>", unsafe_allow_html=True)
     aktif = df_main[df_main["Durum"]=="Aktif"]
@@ -181,7 +198,7 @@ if menu == "🏠 Kort Paneli":
                         st.warning("Silindi"); time.sleep(1); st.rerun()
     else: st.info("Kortta kimse yok.")
 
-# --- 2. SPORCULAR (GELİŞMİŞ PROFİL & TIMELINE) ---
+# --- 2. SPORCULAR ---
 elif menu == "👥 Sporcular":
     st.markdown("<h2 style='color: white;'>👥 Oyuncu Profilleri</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
@@ -238,7 +255,6 @@ elif menu == "👥 Sporcular":
                     logs["Tip"] = "Ders"
                     fins = df_finans[(df_finans["Ogrenci"]==secilen) & (df_finans["Tip"]=="Gelir")].copy()
                     if not fins.empty:
-                        fins["Tutar"] = pd.to_numeric(fins["Tutar"], errors='coerce').fillna(0)
                         fins_fmt = pd.DataFrame({
                             "Tarih": [str(x) for x in fins["Tarih"]],
                             "Saat": ["-"]*len(fins),
@@ -275,36 +291,55 @@ elif menu == "👥 Sporcular":
                     st.success("Eklendi"); time.sleep(0.5); st.rerun()
     else: st.dataframe(df_main, use_container_width=True)
 
-# --- 3. KASA (T-KOD VERSİYONU - SENİN İSTEDİĞİN KOD BLOĞU) ---
+# --- 3. FİNANS (GÜÇLENDİRİLMİŞ & KÖR OKUMA) ---
 elif menu == "💸 Kasa":
     st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
-        df_f = get_data_cached("Finans_Kasa", COL_FINANS)
-        with st.expander("➕ Gelir/Gider Ekle"):
-            with st.form("kasa"):
-                c1, c2 = st.columns(2)
-                tutar = c1.number_input("Tutar", 0.0)
-                tip = c1.selectbox("Tip", ["Gelir", "Gider"])
-                not_ = c2.text_input("Açıklama")
-                if st.form_submit_button("KAYDET"):
-                    # T-Kodun kendi mantığını kullandık
-                    append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), "Genel", tutar, not_, tip], "Finans_Kasa", COL_FINANS)
-                    st.rerun()
-        
-        if not df_f.empty:
-            gelir = df_f[df_f["Tip"]=="Gelir"]["Tutar"].sum()
-            gider = df_f[df_f["Tip"]=="Gider"]["Tutar"].sum()
-            col1, col2, col3 = st.columns(3)
-            col1.metric("GELİR", f"{gelir:,.0f} TL")
-            col2.metric("GİDER", f"{gider:,.0f} TL")
-            col3.metric("NET", f"{gelir-gider:,.0f} TL")
+        if not df_finans.empty:
+            # Artık Tip sütunu kaymış olsa bile COL_FINANS sıralamasına göre 5. indeksi Tip kabul eder.
+            # Veri tipi garantisi
+            df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
             
-            # Grafikler
-            g_col1, g_col2 = st.columns(2)
-            g_col1.plotly_chart(px.bar(df_f[df_f["Tip"]=="Gelir"].groupby("Ay")["Tutar"].sum().reset_index(), x="Ay", y="Tutar", title="Aylık Gelir", color_discrete_sequence=['#ccff00']), use_container_width=True)
-            g_col2.plotly_chart(px.pie(df_f[df_f["Tip"]=="Gelir"].groupby("Ogrenci")["Tutar"].sum().reset_index(), values="Tutar", names="Ogrenci", title="Gelir Dağılımı"), use_container_width=True)
-            st.dataframe(df_f.sort_index(ascending=False), use_container_width=True)
-        else: st.warning("Henüz kasa kaydı bulunmuyor.")
+            # Tip sütunundaki boşlukları temizle
+            df_finans["Tip"] = df_finans["Tip"].astype(str).str.strip()
+            
+            gelir = df_finans[df_finans["Tip"]=="Gelir"]["Tutar"].sum()
+            gider = df_finans[df_finans["Tip"]=="Gider"]["Tutar"].sum()
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("GELİR", f"{gelir:,.0f} TL")
+            c2.metric("GİDER", f"{gider:,.0f} TL")
+            c3.metric("NET", f"{gelir-gider:,.0f} TL")
+            
+            st.markdown("---")
+            col_add, col_graph = st.columns([1, 1.5])
+            
+            with col_add:
+                st.markdown("#### ➕ Hızlı Ekle")
+                with st.form("fin_hizli"):
+                    ft = st.number_input("Tutar", 0.0, step=100.0)
+                    ftp = st.selectbox("Tür", ["Gelir", "Gider"])
+                    fa = st.text_input("Açıklama", "Genel")
+                    if st.form_submit_button("EKLE"):
+                        append_data([
+                            datetime.now().strftime("%Y-%m-%d"), 
+                            datetime.now().strftime("%Y-%m"), 
+                            "Genel", 
+                            float(ft), 
+                            fa, 
+                            ftp
+                        ], "Finans_Kasa", COL_FINANS)
+                        st.rerun()
+            
+            with col_graph:
+                gf = df_finans[df_finans["Tip"]=="Gelir"]
+                if not gf.empty:
+                    fig = px.pie(gf, values="Tutar", names="Ogrenci", title="Gelir Dağılımı", hole=0.4, color_discrete_sequence=px.colors.sequential.Greens_r)
+                    fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
+        else: st.info("Finans verisi yok.")
 
 # --- DİĞER ---
 elif menu == "📅 Çizelge":
