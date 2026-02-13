@@ -14,34 +14,40 @@ st.markdown("""
     .main {background-color: #0b140f;}
     .stApp {background-image: linear-gradient(180deg, #0b140f 0%, #1a2e23 100%);}
     .stButton>button {
-        width: 100%; border-radius: 12px; height: 3.5em; 
+        width: 100%; border-radius: 12px; height: 3.0em; 
         font-weight: bold; background-color: #ccff00; color: #000;
         border: none; transition: 0.3s;
     }
     .stButton>button:hover {background-color: #e6ff80; transform: scale(1.02);}
+    
+    /* Kartlar */
     .player-card {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(204, 255, 0, 0.2);
-        padding: 20px; border-radius: 20px; color: white;
-        text-align: center; margin-bottom: 15px;
+        background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(204, 255, 0, 0.3);
+        padding: 15px; border-radius: 15px; color: white; text-align: center; margin-bottom: 10px;
     }
-    .progress-container {
-        width: 100%; background-color: #222;
-        border-radius: 20px; margin: 15px 0; overflow: hidden;
-        border: 1px solid #444;
+    
+    /* Timeline (Log Akışı) */
+    .timeline-item {
+        background: rgba(255, 255, 255, 0.03); border-left: 4px solid #ccff00;
+        padding: 10px 15px; margin-bottom: 8px; border-radius: 4px; color: #ddd; font-size: 0.9em;
     }
-    .progress-bar {
-        height: 25px; line-height: 25px; color: #000;
-        text-align: center; font-weight: 900; transition: width 0.8s ease;
-    }
+    .timeline-date { color: #888; font-size: 0.75em; display: block; margin-bottom: 4px; }
+    .timeline-money { border-left-color: #00e676 !important; } 
+    .timeline-lesson { border-left-color: #ccff00 !important; } 
+    
+    /* Rozetler */
+    .badge-paid { background-color: #00e676; color: black; padding: 4px 10px; border-radius: 10px; font-weight: bold; }
+    .badge-unpaid { background-color: #ff4b4b; color: white; padding: 4px 10px; border-radius: 10px; font-weight: bold; }
+    
     [data-testid="stSidebar"] {background-color: #080f0b; border-right: 1px solid #ccff0033;}
+    [data-testid="stMetricValue"] {font-size: 1.8rem !important; color: #ccff00 !important;}
     </style>
     """, unsafe_allow_html=True)
 
 # --- YÖNETİCİ ŞİFRESİ ---
 ADMIN_SIFRE = "1234"
 
-# --- GOOGLE SHEETS BAĞLANTISI ---
+# --- GOOGLE BAĞLANTISI ---
 @st.cache_resource
 def baglanti_kur():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -55,242 +61,275 @@ def baglanti_kur():
     return client.open("CourtMaster_DB")
 
 # --- VERİ FONKSİYONLARI ---
-@st.cache_data(ttl=10)
+def get_worksheet(sheet_obj, name, columns):
+    try: return sheet_obj.worksheet(name)
+    except gspread.WorksheetNotFound:
+        new_ws = sheet_obj.add_worksheet(title=name, rows="1000", cols="20")
+        new_ws.append_row(columns)
+        return new_ws
+
+@st.cache_data(ttl=1)
 def get_data_cached(worksheet_name, columns):
     try:
         sheet = baglanti_kur()
-        ws = sheet.worksheet(worksheet_name)
+        ws = get_worksheet(sheet, worksheet_name, columns)
         data = ws.get_all_records()
         df = pd.DataFrame(data)
-        if df.empty:
-            df = pd.DataFrame(columns=columns)
+        if df.empty: df = pd.DataFrame(columns=columns)
         else:
             for col in columns:
                 if col not in df.columns: df[col] = "-"
             
-            # --- FİNANS İÇİN KRİTİK DÜZELTME ---
+            # --- ZORLAYICI SAYI ÇEVİRİCİ ---
             if "Tutar" in df.columns:
-                # Virgülleri noktaya çevir ve sayıya zorla
                 df["Tutar"] = df["Tutar"].astype(str).str.replace(',', '.', regex=False)
                 df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
-            
             if "Kalan Ders" in df.columns: 
                 df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
         return df
-    except Exception:
-        return pd.DataFrame(columns=columns)
+    except: return pd.DataFrame(columns=columns)
 
-def save_data(df, worksheet_name):
-    sheet = baglanti_kur()
-    ws = sheet.worksheet(worksheet_name)
-    ws.clear()
-    ws.update([df.columns.values.tolist()] + df.values.tolist())
+def save_data(df, worksheet_name, columns):
+    sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
+    ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
     st.cache_data.clear()
 
 def append_data(row_data, worksheet_name, columns):
-    sheet = baglanti_kur()
-    try: ws = sheet.worksheet(worksheet_name)
-    except: ws = sheet.add_worksheet(title=worksheet_name, rows=1000, cols=20); ws.append_row(columns)
-    
-    # Verileri string yerine uygun formatta gönderelim (Float hatasını önler)
+    sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
+    # Veri tiplerini temizle (JSON hatasını önler)
     clean_row = []
-    for item in row_data:
-        if isinstance(item, float) or isinstance(item, int): clean_row.append(item)
-        else: clean_row.append(str(item))
-        
+    for x in row_data:
+        if isinstance(x, (int, float)): clean_row.append(x)
+        else: clean_row.append(str(x))
     ws.append_row(clean_row)
     st.cache_data.clear()
 
 # --- ARAYÜZ ---
 with st.sidebar:
-    st.markdown("<h1 style='color: #ccff00; text-align: center;'>TENNIS APP</h1>", unsafe_allow_html=True)
-    st.image("https://cdn-icons-png.flaticon.com/512/2906/2906260.png", width=100)
-    st.markdown("---")
-    
-    with st.expander("🔐 Hoca Girişi"):
-        sifre_input = st.text_input("Şifre", type="password")
-        if sifre_input == ADMIN_SIFRE:
-            st.session_state["admin"] = True
-            st.success("Admin Modu Aktif")
-        else:
-            st.session_state["admin"] = False
-    
+    st.markdown("<h1 style='color: #ccff00; text-align: center;'>Tennis App</h1>", unsafe_allow_html=True)
+    with st.expander("🔐 Giriş"):
+        if st.text_input("Şifre", type="password") == ADMIN_SIFRE: st.session_state["admin"] = True
+        else: st.session_state["admin"] = False
     IS_ADMIN = st.session_state.get("admin", False)
-    
-    if IS_ADMIN:
-        menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Kasa", "📝 Geçmiş"])
-    else:
-        menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
+    menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular", "💸 Finans", "📝 Loglar"] if IS_ADMIN else ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
-# Ana Veriyi Çek
-df_main = get_data_cached("Ogrenci_Data", ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu"])
+# Sütunlar
+COL_OGRENCI = ["Ad Soyad", "Paket (Ders)", "Kalan Ders", "Son Islem", "Durum", "Odeme Durumu", "Notlar"]
+COL_FINANS = ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"]
+COL_LOG = ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"]
+COL_PROG = ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
-# --- 1. KORT PANELİ ---
+# Verileri Çek
+df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
+df_finans = get_data_cached("Finans_Kasa", COL_FINANS)
+df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
+
+# --- 1. KORT PANELİ (SİLME, GERİ ALMA VAR) ---
 if menu == "🏠 Kort Paneli":
-    st.markdown("<h2 style='color: white;'>🎾 Kortta Kim Var?</h2>", unsafe_allow_html=True)
-    c1, c2 = st.columns([2,1])
+    st.markdown("<h2 style='color: white;'>🎾 Kort Yönetimi</h2>", unsafe_allow_html=True)
+    aktif = df_main[df_main["Durum"]=="Aktif"]
     
-    with c1:
-        aktif = df_main[df_main["Durum"]=="Aktif"]
-        if not aktif.empty:
-            sec = st.selectbox("Sporcu Seçiniz", aktif["Ad Soyad"].unique())
+    if not aktif.empty:
+        col_select, col_empty = st.columns([2,1])
+        with col_select:
+            sec = st.selectbox("Oyuncu Seç", aktif["Ad Soyad"].unique())
+            
+        if sec:
             idx = df_main[df_main["Ad Soyad"]==sec].index[0]
             kalan = int(df_main.at[idx, "Kalan Ders"])
-            durum = df_main.at[idx, "Odeme Durumu"]
-            
+            odeme_durumu = df_main.at[idx, "Odeme Durumu"]
             bar_color = "#ccff00" if kalan > 5 else ("#ffa500" if kalan > 2 else "#ff4b4b")
             width = min((kalan / 15) * 100, 100)
+            badge = "badge-paid" if odeme_durumu == "Ödendi" else "badge-unpaid"
             
             st.markdown(f"""
             <div class="player-card">
-                <p style="margin:0; font-size:1.2em; opacity:0.8;">SPORCU</p>
-                <h1 style="margin:0; color:#ccff00; font-size:3em;">{sec}</h1>
-                <div class="progress-container">
-                    <div class="progress-bar" style="width: {width}%; background-color: {bar_color};">
-                        {kalan} DERS
-                    </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span class="{badge}">{odeme_durumu}</span>
+                    <span style="color:#aaa;">{df_main.at[idx, "Son Islem"]}</span>
                 </div>
-                <p style="color:{bar_color}; font-weight:bold;">Ödeme: {durum}</p>
+                <h1 style="color:#ccff00; margin:5px;">{sec}</h1>
+                <div style="background:#333; height:10px; border-radius:5px; margin:10px 0; overflow:hidden;">
+                    <div style="width:{width}%; background:{bar_color}; height:100%;"></div>
+                </div>
+                <h3>{kalan} DERS KALDI</h3>
             </div>
             """, unsafe_allow_html=True)
-            
+
             if IS_ADMIN:
-                ca, cb = st.columns(2)
-                if ca.button("🎾 DERS TAMAMLANDI", type="primary"):
-                    if kalan > 0:
-                        df_main.at[idx, "Kalan Ders"] -= 1
-                        df_main.at[idx, "Son Islem"] = datetime.now().strftime("%d-%m %H:%M")
-                        if df_main.at[idx, "Kalan Ders"] == 0: df_main.at[idx, "Durum"] = "Bitti"
-                        save_data(df_main, "Ogrenci_Data")
-                        append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), sec, "DERS İŞLENDİ", f"Kalan: {kalan-1}"], "Ders_Gecmisi", ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"])
-                        st.balloons(); st.rerun()
-                if cb.button("↩️ HATA DÜZELT (+1)"):
-                    df_main.at[idx, "Kalan Ders"] += 1
-                    save_data(df_main, "Ogrenci_Data"); st.rerun()
-        else: st.info("Şu an aktif sporcu kaydı yok.")
+                c1, c2, c3 = st.columns([2,1,1])
+                with c1:
+                    if st.button("✅ DERS TAMAMLANDI (-1)", type="primary"):
+                        if kalan > 0:
+                            df_main.at[idx, "Kalan Ders"] -= 1
+                            df_main.at[idx, "Son Islem"] = datetime.now().strftime("%d-%m %H:%M")
+                            if df_main.at[idx, "Kalan Ders"] == 0: df_main.at[idx, "Durum"] = "Bitti"
+                            save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                            append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), sec, "Ders İşlendi", f"Kalan: {kalan-1}"], "Ders_Gecmisi", COL_LOG)
+                            st.rerun()
+                with c2:
+                    if st.button("↩️ GERİ (+1)"):
+                        df_main.at[idx, "Kalan Ders"] += 1
+                        save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                        append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), sec, "Geri Alındı", f"Kalan: {kalan+1}"], "Ders_Gecmisi", COL_LOG)
+                        st.rerun()
+                with c3:
+                    if st.button("🗑️ SİL"):
+                        df_main = df_main.drop(idx)
+                        save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                        st.warning("Silindi"); time.sleep(1); st.rerun()
+    else: st.info("Kortta kimse yok.")
 
-    with c2:
-        st.markdown("<h4 style='color:white;'>📝 Son İşlemler</h4>", unsafe_allow_html=True)
-        log_data = get_data_cached("Ders_Gecmisi", ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"])
-        st.dataframe(log_data.tail(7).iloc[::-1], use_container_width=True, hide_index=True)
-
-# --- 2. ÇİZELGE ---
-elif menu == "📅 Çizelge":
-    st.markdown("<h2 style='color: white;'>📅 Haftalık Antrenman Programı</h2>", unsafe_allow_html=True)
-    df_prog = get_data_cached("Ders_Programi", ["Saat", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"])
-    if df_prog.empty:
-        saatler = [f"{s:02d}:00" for s in range(8, 23)]
-        df_prog = pd.DataFrame({"Saat": saatler})
-        for gun in ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]: df_prog[gun] = ""
-        save_data(df_prog, "Ders_Programi")
-        
-    if IS_ADMIN:
-        edited = st.data_editor(df_prog, num_rows="fixed", use_container_width=True, height=600, hide_index=True)
-        if not df_prog.equals(edited): save_data(edited, "Ders_Programi"); st.toast("Program Güncellendi!")
-    else:
-        st.dataframe(df_prog, use_container_width=True, height=600, hide_index=True)
-
-# --- 3. SPORCULAR ---
+# --- 2. SPORCULAR (GELİŞMİŞ PROFİL + TIMELINE) ---
 elif menu == "👥 Sporcular":
-    st.markdown("<h2 style='color: white;'>👥 Sporcu Listesi</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: white;'>👥 Oyuncu Profilleri</h2>", unsafe_allow_html=True)
     if IS_ADMIN:
-        t1, t2, t3 = st.tabs(["🎾 Paket Güncelle", "➕ Yeni Sporcu", "📋 Tüm Liste"])
+        t1, t2 = st.tabs(["👤 Profil Kartı", "➕ Yeni Kayıt"])
         with t1:
-            with st.form("yenile"):
-                s = st.selectbox("Sporcu Seç", df_main["Ad Soyad"].unique())
-                e = st.number_input("Eklenen Ders", 0, step=1)
-                t = st.checkbox("Ödeme Alındı")
-                f = st.number_input("Tutar (TL)", 0.0, step=100.0)
-                if st.form_submit_button("GÜNCELLE"):
-                    idx = df_main[df_main["Ad Soyad"]==s].index[0]
-                    df_main.at[idx, "Kalan Ders"] += e
-                    df_main.at[idx, "Durum"] = "Aktif"
-                    if t: 
-                        df_main.at[idx, "Odeme Durumu"] = "Ödendi"
-                        # FİNANS SÜTUNLARI: Tarih, Ay, Ogrenci, Tutar, Not, Tip
-                        append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), s, float(f), "Paket Yenileme", "Gelir"], "Finans_Kasa", ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"])
-                    else: df_main.at[idx, "Odeme Durumu"] = "Ödenmedi"
-                    save_data(df_main, "Ogrenci_Data"); st.success("Güncellendi"); st.rerun()
-        with t2:
-            with st.form("yeni"):
-                ad = st.text_input("Sporcu Ad Soyad")
-                p = st.number_input("Başlangıç Paket", 0)
-                if st.form_submit_button("KAYDET"):
-                    new_row = {"Ad Soyad": ad, "Paket (Ders)": p, "Kalan Ders": p, "Son Islem": "-", "Durum": "Aktif", "Odeme Durumu": "Ödenmedi"}
-                    df_main = pd.concat([df_main, pd.DataFrame([new_row])], ignore_index=True)
-                    save_data(df_main, "Ogrenci_Data"); st.success("Sporcu Eklendi"); st.rerun()
-        with t3:
-            st.dataframe(df_main, use_container_width=True, hide_index=True)
-    else:
-        st.dataframe(df_main[["Ad Soyad", "Kalan Ders", "Odeme Durumu"]], use_container_width=True, hide_index=True)
+            secilen = st.selectbox("Oyuncu Seç", ["Seçiniz..."] + list(df_main["Ad Soyad"].unique()))
+            if secilen != "Seçiniz...":
+                idx = df_main[df_main["Ad Soyad"] == secilen].index[0]
+                durum = df_main.at[idx, "Durum"]
+                odeme = df_main.at[idx, "Odeme Durumu"]
 
-# --- 4. KASA (GELİŞMİŞ VE DÜZELTİLMİŞ) ---
-elif menu == "💸 Kasa":
-    st.markdown("<h2 style='color: white;'>💸 Kasa & Finans</h2>", unsafe_allow_html=True)
-    if IS_ADMIN:
-        # Gelişmiş Finans Verisini Çek
-        df_f = get_data_cached("Finans_Kasa", ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"])
-        
-        # Manuel Ekleme Formu
-        with st.expander("➕ Manuel Gelir/Gider Ekle", expanded=False):
-            with st.form("manuel_finans"):
-                c1, c2 = st.columns(2)
-                f_tutar = c1.number_input("Tutar (TL)", min_value=0.0, step=100.0)
-                f_tip = c1.selectbox("Tür", ["Gelir", "Gider"])
-                f_aciklama = c2.text_input("Açıklama (Örn: Kort Kirası)")
-                f_kisi = c2.text_input("Kişi (Opsiyonel)")
+                # Üst Bilgi + Dondurma
+                c_h1, c_h2 = st.columns([3, 1])
+                with c_h1:
+                    st.markdown(f"### {secilen} <span style='font-size:0.6em; color:{'#00b0ff' if durum=='Donduruldu' else '#ccff00'}'>({durum})</span>", unsafe_allow_html=True)
+                with c_h2:
+                    if durum == "Aktif":
+                        if st.button("❄️ DONDUR"):
+                            df_main.at[idx, "Durum"] = "Donduruldu"
+                            save_data(df_main, "Ogrenci_Data", COL_OGRENCI); st.rerun()
+                    else:
+                        if st.button("🔥 AKTİF ET"):
+                            df_main.at[idx, "Durum"] = "Aktif"
+                            save_data(df_main, "Ogrenci_Data", COL_OGRENCI); st.rerun()
+
+                # İKİYE BÖLÜNMÜŞ EKRAN
+                col_L, col_R = st.columns([1, 1.2])
                 
-                if st.form_submit_button("KAYDET"):
-                    append_data([
-                        datetime.now().strftime("%Y-%m-%d"), 
-                        datetime.now().strftime("%Y-%m"), 
-                        f_kisi if f_kisi else "Genel", 
-                        float(f_tutar), 
-                        f_aciklama, 
-                        f_tip
-                    ], "Finans_Kasa", ["Tarih", "Ay", "Ogrenci", "Tutar", "Not", "Tip"])
-                    st.success("İşlem Kaydedildi"); st.rerun()
+                # SOL: İŞLEMLER
+                with col_L:
+                    st.markdown("#### ⚙️ Ayarlar")
+                    with st.form("ayar_form"):
+                        st.write(f"Mevcut Ders: **{df_main.at[idx, 'Kalan Ders']}**")
+                        ek = st.number_input("➕ Paket Ekle (Ders)", 0, step=1)
+                        
+                        st.markdown("---")
+                        y_odeme = st.selectbox("Ödeme Durumu", ["Ödenmedi", "Ödendi"], index=0 if odeme=="Ödenmedi" else 1)
+                        y_tutar = st.number_input("Tahsilat Yap (TL)", 0.0, step=100.0)
+                        y_not = st.text_area("Notlar", str(df_main.at[idx, "Notlar"]))
+                        
+                        if st.form_submit_button("KAYDET"):
+                            if ek > 0:
+                                df_main.at[idx, "Kalan Ders"] += ek
+                                append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), secilen, "Paket Eklendi", f"+{ek} Ders"], "Ders_Gecmisi", COL_LOG)
+                            
+                            if y_tutar > 0:
+                                append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), secilen, float(y_tutar), "Ödeme Alındı", "Gelir"], "Finans_Kasa", COL_FINANS)
+                                append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), secilen, "Ödeme", f"{y_tutar} TL"], "Ders_Gecmisi", COL_LOG)
+                                y_odeme = "Ödendi" # Para girdiyse ödendi yap
+                            
+                            df_main.at[idx, "Odeme Durumu"] = y_odeme
+                            df_main.at[idx, "Notlar"] = y_not
+                            if df_main.at[idx, "Durum"] != "Donduruldu" and df_main.at[idx, "Kalan Ders"] > 0:
+                                df_main.at[idx, "Durum"] = "Aktif"
+                                
+                            save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                            st.success("Kaydedildi"); time.sleep(0.5); st.rerun()
 
-        if not df_f.empty:
-            # Tip sütunu yoksa varsayılan Gelir ata
-            if "Tip" not in df_f.columns: df_f["Tip"] = "Gelir"
+                # SAĞ: TIMELINE
+                with col_R:
+                    st.markdown("#### 📜 Geçmiş Akışı")
+                    # Logları birleştir
+                    logs = df_logs[df_logs["Ogrenci"]==secilen].copy()
+                    logs["Tip"] = "Ders"
+                    
+                    fins = df_finans[(df_finans["Ogrenci"]==secilen) & (df_finans["Tip"]=="Gelir")].copy()
+                    if not fins.empty:
+                        fins_fmt = pd.DataFrame({
+                            "Tarih": [str(x) for x in fins["Tarih"]],
+                            "Saat": ["-"]*len(fins),
+                            "Ogrenci": fins["Ogrenci"],
+                            "Islem": ["Ödeme"]*len(fins),
+                            "Detay": [f"{x:,.0f} TL" for x in fins["Tutar"]],
+                            "Tip": ["Para"]*len(fins)
+                        })
+                        full_log = pd.concat([logs, fins_fmt], ignore_index=True)
+                    else: full_log = logs
+                    
+                    if not full_log.empty:
+                        full_log = full_log.iloc[::-1]
+                        for _, r in full_log.head(15).iterrows():
+                            cls = "timeline-money" if r.get("Tip")=="Para" else "timeline-lesson"
+                            icon = "💰" if r.get("Tip")=="Para" else "🎾"
+                            st.markdown(f"""<div class="timeline-item {cls}"><span class="timeline-date">{r['Tarih']}</span><b>{icon} {r['Islem']}</b>: {r['Detay']}</div>""", unsafe_allow_html=True)
+                    else: st.info("Kayıt yok.")
+
+        with t2:
+            st.markdown("### 🆕 Yeni Kayıt")
+            with st.form("new_user"):
+                ad = st.text_input("Ad Soyad")
+                p = st.number_input("Paket (Ders)", 0, step=1, value=10)
+                u = st.number_input("Peşinat (TL)", 0.0, step=100.0)
+                o = st.selectbox("Durum", ["Ödenmedi", "Ödendi"])
+                if st.form_submit_button("EKLE"):
+                    new_r = {"Ad Soyad": ad, "Paket (Ders)": p, "Kalan Ders": p, "Son Islem": "-", "Durum": "Aktif", "Odeme Durumu": o, "Notlar": "-"}
+                    df_main = pd.concat([df_main, pd.DataFrame([new_r])], ignore_index=True)
+                    save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
+                    if u > 0:
+                        append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), ad, float(u), "İlk Kayıt", "Gelir"], "Finans_Kasa", COL_FINANS)
+                        append_data([datetime.now().strftime("%d-%m-%Y"), datetime.now().strftime("%H:%M"), ad, "Ödeme", f"{u} TL"], "Ders_Gecmisi", COL_LOG)
+                    st.success("Eklendi"); time.sleep(0.5); st.rerun()
+    else: st.dataframe(df_main, use_container_width=True)
+
+# --- 3. FİNANS (SADE & SAĞLAM) ---
+elif menu == "💸 Finans":
+    st.markdown("<h2 style='color: white;'>💸 Kasa</h2>", unsafe_allow_html=True)
+    if IS_ADMIN:
+        if not df_finans.empty:
+            if "Tip" not in df_finans.columns: df_finans["Tip"] = "Gelir"
+            df_finans["Tutar"] = pd.to_numeric(df_finans["Tutar"], errors='coerce').fillna(0)
             
-            # Hesaplamalar
-            gelir = df_f[df_f["Tip"]=="Gelir"]["Tutar"].sum()
-            gider = df_f[df_f["Tip"]=="Gider"]["Tutar"].sum()
-            net = gelir - gider
+            gelir = df_finans[df_finans["Tip"]=="Gelir"]["Tutar"].sum()
+            gider = df_finans[df_finans["Tip"]=="Gider"]["Tutar"].sum()
             
-            # Metrikler
-            col1, col2, col3 = st.columns(3)
-            col1.metric("TOPLAM GELİR", f"{gelir:,.0f} TL")
-            col2.metric("TOPLAM GİDER", f"{gider:,.0f} TL", delta_color="inverse")
-            col3.metric("NET KASA", f"{net:,.0f} TL")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("GELİR", f"{gelir:,.0f} TL")
+            c2.metric("GİDER", f"{gider:,.0f} TL")
+            c3.metric("NET", f"{gelir-gider:,.0f} TL")
             
             st.markdown("---")
+            col_add, col_graph = st.columns([1, 1.5])
             
-            # Grafikler
-            g1, g2 = st.columns(2)
-            gelir_data = df_f[df_f["Tip"]=="Gelir"]
+            with col_add:
+                st.markdown("#### ➕ Hızlı Ekle")
+                with st.form("fin_hizli"):
+                    ft = st.number_input("Tutar", 0.0)
+                    ftp = st.selectbox("Tür", ["Gelir", "Gider"])
+                    fa = st.text_input("Açıklama", "Genel")
+                    if st.form_submit_button("EKLE"):
+                        append_data([datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m"), "Genel", float(ft), fa, ftp], "Finans_Kasa", COL_FINANS)
+                        st.rerun()
             
-            if not gelir_data.empty:
-                # Zaman Grafiği
-                fig_bar = px.bar(gelir_data.groupby("Ay")["Tutar"].sum().reset_index(), x="Ay", y="Tutar", title="Aylık Gelir Akışı", color_discrete_sequence=['#ccff00'])
-                g1.plotly_chart(fig_bar, use_container_width=True)
-                
-                # Pasta Grafiği
-                fig_pie = px.pie(gelir_data.groupby("Ogrenci")["Tutar"].sum().reset_index(), values="Tutar", names="Ogrenci", title="Gelir Dağılımı", hole=0.4, color_discrete_sequence=px.colors.sequential.Greens_r)
-                g2.plotly_chart(fig_pie, use_container_width=True)
+            with col_graph:
+                gf = df_finans[df_finans["Tip"]=="Gelir"]
+                if not gf.empty:
+                    fig = px.pie(gf, values="Tutar", names="Ogrenci", title="Gelir Dağılımı", hole=0.4, color_discrete_sequence=px.colors.sequential.Greens_r)
+                    fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
+                    st.plotly_chart(fig, use_container_width=True)
             
-            # Tablo
-            st.dataframe(df_f.sort_index(ascending=False), use_container_width=True, hide_index=True)
-        else:
-            st.warning("Henüz kasa kaydı bulunmuyor. Yukarıdan ekleme yapabilirsiniz.")
-    else:
-        st.error("Bu alan sadece antrenörlere özeldir.")
+            st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
+        else: st.info("Finans verisi yok.")
 
-elif menu == "📝 Geçmiş":
-    st.markdown("<h2 style='color: white;'>📝 İşlem Geçmişi</h2>", unsafe_allow_html=True)
-    loglar = get_data_cached("Ders_Gecmisi", ["Tarih", "Saat", "Ogrenci", "Islem", "Detay"])
-    kisi = st.selectbox("Sporcuya Göre Filtrele", ["Tümü"] + list(df_main["Ad Soyad"].unique()))
-    if kisi != "Tümü": loglar = loglar[loglar["Ogrenci"]==kisi]
-    st.dataframe(loglar.sort_index(ascending=False), use_container_width=True, hide_index=True)
+# --- DİĞER ---
+elif menu == "📅 Çizelge":
+    df_prog = get_data_cached("Ders_Programi", COL_PROG)
+    if IS_ADMIN:
+        ed = st.data_editor(df_prog, use_container_width=True, hide_index=True)
+        if not df_prog.equals(ed): save_data(ed, "Ders_Programi", COL_PROG)
+    else: st.dataframe(df_prog, use_container_width=True)
+
+elif menu == "📝 Loglar":
+    st.dataframe(df_logs.sort_index(ascending=False), use_container_width=True)
