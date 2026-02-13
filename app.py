@@ -19,49 +19,26 @@ st.markdown("""
         border: none; transition: 0.3s;
     }
     .stButton>button:hover {background-color: #e6ff80; transform: scale(1.02);}
-    
-    /* Kartlar */
     .player-card {
         background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(204, 255, 0, 0.2);
         padding: 20px; border-radius: 20px; color: white;
         text-align: center; margin-bottom: 15px;
     }
-    
-    /* Timeline (Zaman Tüneli) */
-    .timeline-container {
-        border-left: 2px solid #333; padding-left: 20px; margin-left: 10px;
-    }
+    .timeline-container { border-left: 2px solid #333; padding-left: 20px; margin-left: 10px; }
     .timeline-item {
-        background: rgba(255, 255, 255, 0.03); 
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 10px; padding: 15px; margin-bottom: 15px;
-        position: relative; transition: 0.3s;
+        background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 10px; padding: 15px; margin-bottom: 15px; position: relative; transition: 0.3s;
     }
     .timeline-item:hover { background: rgba(255, 255, 255, 0.08); }
-    .timeline-item::before {
-        content: ''; position: absolute; left: -26px; top: 20px;
-        width: 12px; height: 12px; border-radius: 50%;
-    }
-    
-    /* Renk Kodları */
-    .t-money { border-left: 4px solid #00e676 !important; } /* Para */
-    .t-money::before { background: #00e676; box-shadow: 0 0 10px #00e676; }
-    
-    .t-lesson { border-left: 4px solid #ccff00 !important; } /* Ders */
-    .t-lesson::before { background: #ccff00; box-shadow: 0 0 10px #ccff00; }
-    
-    .t-sys { border-left: 4px solid #00b0ff !important; } /* Ziyaretçi/Sistem */
-    .t-sys::before { background: #00b0ff; box-shadow: 0 0 10px #00b0ff; }
-    
+    .t-money { border-left: 4px solid #00e676 !important; } 
+    .t-lesson { border-left: 4px solid #ccff00 !important; } 
+    .t-sys { border-left: 4px solid #00b0ff !important; }
     .time-badge { font-size: 0.8em; color: #888; margin-bottom: 5px; display: block; }
     .log-title { font-size: 1.1em; font-weight: bold; color: white; }
     .log-detail { color: #ccc; font-size: 0.9em; }
-    
-    /* Rozetler */
     .badge-paid { background-color: #00e676; color: black; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.8em; }
     .badge-unpaid { background-color: #ff4b4b; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.8em; }
     .badge-frozen { background-color: #00b0ff; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.8em; }
-    
     [data-testid="stSidebar"] {background-color: #080f0b; border-right: 1px solid #ccff0033;}
     </style>
     """, unsafe_allow_html=True)
@@ -80,21 +57,38 @@ def baglanti_kur():
     else:
         creds = ServiceAccountCredentials.from_json_keyfile_name('secrets.json', scope)
     client = gspread.authorize(creds)
+    # DOSYA ADINI BURADAN KONTROL ET (Senin dosyanın adı neyse onu yaz)
     return client.open("CourtMaster_DB")
 
-# --- VERİ FONKSİYONLARI (KÖR OKUMA / BLIND READ) ---
-def get_worksheet(sheet_obj, name, columns):
-    try: return sheet_obj.worksheet(name)
+# --- OTOMATİK KURULUM VE VERİ ÇEKME ---
+def get_worksheet_or_create(sheet_obj, name, columns):
+    """Sayfa yoksa oluşturur, varsa getirir. Başlık yoksa ekler."""
+    try:
+        ws = sheet_obj.worksheet(name)
+        # Sayfa boşsa başlıkları ekle
+        if not ws.get_all_values():
+            ws.append_row(columns)
+            # Eğer Ders_Programi ise saatleri de ekle
+            if name == "Ders_Programi":
+                saatler = [[f"{h:02d}:00"] + [""]*7 for h in range(8, 24)]
+                ws.append_rows(saatler)
+        return ws
     except gspread.WorksheetNotFound:
-        new_ws = sheet_obj.add_worksheet(title=name, rows="1000", cols="20")
-        new_ws.append_row(columns)
-        return new_ws
+        # Sayfa yoksa oluştur
+        ws = sheet_obj.add_worksheet(title=name, rows="1000", cols="20")
+        ws.append_row(columns)
+        if name == "Ders_Programi":
+            saatler = [[f"{h:02d}:00"] + [""]*7 for h in range(8, 24)]
+            ws.append_rows(saatler)
+        return ws
 
 @st.cache_data(ttl=1)
 def get_data_cached(worksheet_name, expected_columns):
     try:
         sheet = baglanti_kur()
-        ws = get_worksheet(sheet, worksheet_name, expected_columns)
+        # Otomatik kurulum fonksiyonunu çağır
+        ws = get_worksheet_or_create(sheet, worksheet_name, expected_columns)
+        
         all_values = ws.get_all_values()
         
         if len(all_values) < 2: return pd.DataFrame(columns=expected_columns)
@@ -107,7 +101,7 @@ def get_data_cached(worksheet_name, expected_columns):
                 
         df = pd.DataFrame(clean_data, columns=expected_columns)
         
-        # Sayısal Temizlik (Hata Önleyici)
+        # Sayısal Temizlik
         if "Tutar" in df.columns:
             df["Tutar"] = df["Tutar"].astype(str).str.strip().str.replace(',', '.', regex=False)
             df["Tutar"] = pd.to_numeric(df["Tutar"], errors='coerce').fillna(0)
@@ -115,15 +109,17 @@ def get_data_cached(worksheet_name, expected_columns):
             df["Kalan Ders"] = pd.to_numeric(df["Kalan Ders"], errors='coerce').fillna(0)
             
         return df
-    except: return pd.DataFrame(columns=expected_columns)
+    except Exception as e:
+        st.error(f"Veri hatası: {e}")
+        return pd.DataFrame(columns=expected_columns)
 
 def save_data(df, worksheet_name, columns):
-    sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
+    sheet = baglanti_kur(); ws = get_worksheet_or_create(sheet, worksheet_name, columns)
     ws.clear(); ws.update([df.columns.values.tolist()] + df.values.tolist())
     st.cache_data.clear()
 
 def append_data(row_data, worksheet_name, columns):
-    sheet = baglanti_kur(); ws = get_worksheet(sheet, worksheet_name, columns)
+    sheet = baglanti_kur(); ws = get_worksheet_or_create(sheet, worksheet_name, columns)
     clean_row = []
     for x in row_data:
         if isinstance(x, (int, float)): clean_row.append(x)
@@ -159,7 +155,7 @@ with st.sidebar:
     else:
         menu = st.radio("MENÜ", ["🏠 Kort Paneli", "📅 Çizelge", "👥 Sporcular"])
 
-# Verileri Çek
+# Verileri Çek (Eğer yoksa oluşturur)
 df_main = get_data_cached("Ogrenci_Data", COL_OGRENCI)
 df_finans = get_data_cached("Finans_Kasa", COL_FINANS)
 df_logs = get_data_cached("Ders_Gecmisi", COL_LOG)
@@ -216,7 +212,7 @@ if menu == "🏠 Kort Paneli":
                         df_main = df_main.drop(idx)
                         save_data(df_main, "Ogrenci_Data", COL_OGRENCI)
                         st.warning("Silindi"); time.sleep(1); st.rerun()
-    else: st.info("Kortta kimse yok.")
+    else: st.info("Kortta kimse yok. 'Sporcular' menüsünden yeni kayıt ekleyin.")
 
 # --- 2. SPORCULAR ---
 elif menu == "👥 Sporcular":
@@ -346,14 +342,13 @@ elif menu == "💸 Kasa":
                     fig.update_layout(height=300, margin=dict(t=30, b=0, l=0, r=0))
                     st.plotly_chart(fig, use_container_width=True)
             st.dataframe(df_finans.sort_index(ascending=False), use_container_width=True)
-        else: st.info("Veri yok.")
+        else: st.info("Veri yok. Kasa boş.")
 
 # --- 4. AYRIŞTIRILMIŞ GEÇMİŞ (SEKMELİ) ---
 elif menu == "📝 Geçmiş":
     st.markdown("<h2 style='color: white;'>📝 Geçmiş Kayıtlar</h2>", unsafe_allow_html=True)
     
-    # Tüm Logları Birleştirme
-    logs = df_logs.copy(); logs["Tip"] = "Ders" # Varsayılan Tip
+    logs = df_logs.copy(); logs["Tip"] = "Ders"
     fins = df_finans.copy()
     
     if not fins.empty:
@@ -368,23 +363,19 @@ elif menu == "📝 Geçmiş":
         master_log = pd.concat([logs, fins_fmt], ignore_index=True)
     else: master_log = logs
 
-    # Misafirleri İşaretle (Çünkü logs tablosunda da olabilirler)
     master_log.loc[master_log["Ogrenci"] == "Misafir", "Tip"] = "Ziyaret"
 
     if not master_log.empty:
-        master_log = master_log.iloc[::-1] # En yeni en üstte
+        master_log = master_log.iloc[::-1]
 
-        # --- SEKMELER ---
         tab_all, tab_ders, tab_finans, tab_sys = st.tabs(["Tümü", "🎾 Ders Hareketleri", "💰 Finans Raporu", "👀 Ziyaretçi Logu"])
 
         def render_timeline(df_subset):
             if df_subset.empty:
                 st.info("Bu kategoride kayıt yok.")
                 return
-            
             st.markdown('<div class="timeline-container">', unsafe_allow_html=True)
             for _, r in df_subset.head(50).iterrows():
-                # Stil
                 tip = r.get("Tip")
                 if tip == "Para": css = "t-money"; icon = "💰"
                 elif tip == "Gider": css = "t-sys"; icon = "📉"
@@ -400,25 +391,10 @@ elif menu == "📝 Geçmiş":
                 """, unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-        with tab_all:
-            render_timeline(master_log)
-        
-        with tab_ders:
-            # Sadece ders ile ilgili olanlar (Misafir ve Finans hariç)
-            # Tip = "Ders" olanlar ama Öğrenci "Misafir" olmayanlar
-            df_d = master_log[(master_log["Tip"] == "Ders") & (master_log["Ogrenci"] != "Misafir")]
-            render_timeline(df_d)
-            
-        with tab_finans:
-            # Para ve Gider
-            df_f = master_log[master_log["Tip"].isin(["Para", "Gider"])]
-            render_timeline(df_f)
-            
-        with tab_sys:
-            # Sadece Ziyaretçiler
-            df_s = master_log[master_log["Tip"] == "Ziyaret"]
-            render_timeline(df_s)
-
+        with tab_all: render_timeline(master_log)
+        with tab_ders: render_timeline(master_log[(master_log["Tip"] == "Ders") & (master_log["Ogrenci"] != "Misafir")])
+        with tab_finans: render_timeline(master_log[master_log["Tip"].isin(["Para", "Gider"])])
+        with tab_sys: render_timeline(master_log[master_log["Tip"] == "Ziyaret"])
     else:
         st.info("Henüz bir hareketlilik yok.")
 
